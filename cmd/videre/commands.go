@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
@@ -401,14 +402,16 @@ func findCallback(query string, key int) {
 		} else if current == len(E.rows) {
 			current = 0
 		}
-		p := bytes.Index(E.rows[current].s, E.searchBytes)
-		if p >= 0 {
-			findLastMatch = current
-			E.cy = current
-			E.cx = p
-			E.preferred = E.cx
-			E.rowoff = len(E.rows)
-			break
+		if E.searchRegexp != nil {
+			p := E.searchRegexp.FindIndex(E.rows[current].s)
+			if p != nil {
+				findLastMatch = current
+				E.cy = current
+				E.cx = p[0]
+				E.preferred = E.cx
+				E.rowoff = len(E.rows)
+				break
+			}
 		}
 	}
 	updateAllSyntax(true)
@@ -423,7 +426,7 @@ func find() {
 }
 
 func findNext(dir int) {
-	if len(E.searchBytes) == 0 || len(E.rows) == 0 {
+	if E.searchRegexp == nil || len(E.rows) == 0 {
 		return
 	}
 	cur := E.cy
@@ -433,7 +436,6 @@ func findNext(dir int) {
 	} else {
 		curCol--
 	}
-	qLen := len(E.searchBytes)
 	for i := 0; i < len(E.rows); i++ {
 		cur += dir
 		if cur < 0 {
@@ -444,33 +446,42 @@ func findNext(dir int) {
 		}
 		line := E.rows[cur].s
 		if dir > 0 {
+			startSearchAt := 0
 			if cur == E.cy {
-				if curCol < len(line) {
-					if m := bytes.Index(line[curCol:], E.searchBytes); m >= 0 {
-						m += curCol
-						E.cy, E.cx, E.preferred = cur, m, m
-						updateAllSyntax(true)
-						return
-					}
+				startSearchAt = curCol
+			}
+			if startSearchAt < len(line) {
+				m := E.searchRegexp.FindIndex(line[startSearchAt:])
+				if m != nil {
+					E.cy, E.cx, E.preferred = cur, startSearchAt+m[0], startSearchAt+m[0]
+					updateAllSyntax(true)
+					return
 				}
-			} else {
-				if m := bytes.Index(line, E.searchBytes); m >= 0 {
-					E.cy, E.cx, E.preferred = cur, m, m
+			} else if cur != E.cy {
+				// Search the whole line for next row
+				m := E.searchRegexp.FindIndex(line)
+				if m != nil {
+					E.cy, E.cx, E.preferred = cur, m[0], m[0]
 					updateAllSyntax(true)
 					return
 				}
 			}
 		} else {
-			start := len(line) - 1
-			if cur == E.cy {
-				start = curCol
-			}
-			if start >= len(line) {
-				start = len(line) - 1
-			}
-			for x := start; x >= 0; x-- {
-				if x+qLen <= len(line) && bytes.Equal(line[x:x+qLen], E.searchBytes) {
-					E.cy, E.cx, E.preferred = cur, x, x
+			matches := E.searchRegexp.FindAllIndex(line, -1)
+			if len(matches) > 0 {
+				targetMatch := -1
+				if cur == E.cy {
+					for j := len(matches) - 1; j >= 0; j-- {
+						if matches[j][0] <= curCol {
+							targetMatch = j
+							break
+						}
+					}
+				} else {
+					targetMatch = len(matches) - 1
+				}
+				if targetMatch != -1 {
+					E.cy, E.cx, E.preferred = cur, matches[targetMatch][0], matches[targetMatch][0]
 					updateAllSyntax(true)
 					return
 				}
@@ -587,13 +598,27 @@ func handleSubstitute(cmd string) {
 
 	saveUndo()
 	madeChanges := false
+	re, err := regexp.Compile("(?i)" + pattern)
+	if err != nil {
+		setStatus("Invalid regex: %v", err)
+		return
+	}
+
 	for y := startRow; y <= endRow; y++ {
 		line := string(E.rows[y].s)
 		var newLine string
 		if global {
-			newLine = strings.ReplaceAll(line, pattern, replacement)
+			newLine = re.ReplaceAllString(line, replacement)
 		} else {
-			newLine = strings.Replace(line, pattern, replacement, 1)
+			// Replace only first occurrence
+			found := false
+			newLine = re.ReplaceAllStringFunc(line, func(match string) string {
+				if found {
+					return match
+				}
+				found = true
+				return re.ReplaceAllString(match, replacement)
+			})
 		}
 
 		if newLine != line {

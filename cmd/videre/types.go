@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"regexp"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -100,6 +101,7 @@ type editor struct {
 	selSX, selSY      int
 	searchPattern     string
 	searchBytes       []byte
+	searchRegexp      *regexp.Regexp
 	lastSearchChar    byte
 	lastSearchDir     int
 	lastSearchTill    bool

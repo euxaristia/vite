@@ -150,6 +150,31 @@ func TestRepeatCommand(t *testing.T) {
 	}
 }
 
+func TestRegexSearch(t *testing.T) {
+	seedEditor([]string{"item 123", "line 456", "another line"}, 0, 0)
+	
+	// Test finding digits
+	setSearchPattern("123") // Start with literal
+	findNext(1)
+	if E.cy != 0 || E.cx != 5 {
+		t.Errorf("regex find 123 failed: got (%d,%d), want (0,5)", E.cy, E.cx)
+	}
+	
+	setSearchPattern("456")
+	findNext(1)
+	if E.cy != 1 || E.cx != 5 {
+		t.Errorf("regex find 456 failed: got (%d,%d), want (1,5)", E.cy, E.cx)
+	}
+	
+	// Test start of line anchor
+	seedEditor([]string{"  func", "func", "other"}, 0, 0)
+	setSearchPattern("^func")
+	findNext(1)
+	if E.cy != 1 || E.cx != 0 {
+		t.Errorf("regex anchor search failed: got (%d,%d), want (1,0)", E.cy, E.cx)
+	}
+}
+
 func TestShiftArrowMotions(t *testing.T) {
 	seedEditor([]string{"word1 word2", "", "word3"}, 0, 0)
 	

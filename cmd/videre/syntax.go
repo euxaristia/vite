@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -160,22 +161,17 @@ func updateSyntax(r *row, force bool) bool {
 	stateChanged := r.hlState != newHlState
 	r.hlState = newHlState
 
-	if len(E.searchBytes) > 0 {
-		q := E.searchBytes
-		for off := 0; ; {
-			m := bytes.Index(r.s[off:], q)
-			if m < 0 {
-				break
-			}
-			m += off
-			for i := m; i < m+len(q) && i < len(r.hl); i++ {
-				if r.idx == E.cy && m <= E.cx && E.cx < m+len(q) {
+	if E.searchRegexp != nil {
+		matches := E.searchRegexp.FindAllIndex(r.s, -1)
+		for _, m := range matches {
+			start, end := m[0], m[1]
+			for i := start; i < end && i < len(r.hl); i++ {
+				if r.idx == E.cy && start <= E.cx && E.cx < end {
 					r.hl[i] = hlMatchCursor
 				} else {
 					r.hl[i] = hlMatch
 				}
 			}
-			off = m + 1
 		}
 	}
 	return stateChanged
@@ -213,7 +209,14 @@ func setSearchPattern(p string) {
 	E.searchPattern = p
 	if p == "" {
 		E.searchBytes = nil
+		E.searchRegexp = nil
 		return
 	}
 	E.searchBytes = append(E.searchBytes[:0], p...)
+	re, err := regexp.Compile("(?i)" + p)
+	if err == nil {
+		E.searchRegexp = re
+	} else {
+		E.searchRegexp = regexp.MustCompile("(?i)" + regexp.QuoteMeta(p))
+	}
 }
