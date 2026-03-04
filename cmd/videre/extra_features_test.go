@@ -103,6 +103,33 @@ func TestTextObjects(t *testing.T) {
 	}
 }
 
+func TestMultilineSyntax(t *testing.T) {
+	seedEditor([]string{"/* start", "middle", "end */", "outside"}, 0, 0)
+	E.filename = "test.c"
+	selectSyntax() // This should force update all and handle block comments
+
+	if E.rows[0].hl[0] != hlComment {
+		t.Errorf("expected hlComment at row 0, got %d", E.rows[0].hl[0])
+	}
+	if E.rows[1].hl[0] != hlComment {
+		t.Errorf("expected hlComment at row 1 (propagation), got %d", E.rows[1].hl[0])
+	}
+	if E.rows[2].hl[0] != hlComment {
+		t.Errorf("expected hlComment at row 2, got %d", E.rows[2].hl[0])
+	}
+	if E.rows[3].hl[0] != hlNormal {
+		t.Errorf("expected hlNormal at row 3, got %d", E.rows[3].hl[0])
+	}
+
+	// Test propagation on modification
+	E.rows[0].s = []byte("normal line")
+	E.rows[0].needsHighlight = true
+	updateAllSyntax(false)
+	if E.rows[1].hl[0] != hlNormal {
+		t.Errorf("expected hlNormal at row 1 after propagation, got %d", E.rows[1].hl[0])
+	}
+}
+
 func TestShiftArrowMotions(t *testing.T) {
 	seedEditor([]string{"word1 word2", "", "word3"}, 0, 0)
 	

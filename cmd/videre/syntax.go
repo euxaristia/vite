@@ -6,10 +6,19 @@ import (
 	"strings"
 )
 
+type syntax struct {
+	filetype string
+	exts     []string
+	kws      []keyword
+	lineCmt  string
+	blkCmtS  string
+	blkCmtE  string
+}
+
 var syntaxes = []syntax{
-	{filetype: "c", exts: []string{".c", ".h"}, kws: kwList([]string{"if", "else", "for", "while", "switch", "case", "return", "struct|", "int|", "char|", "void|"}), lineCmt: "//"},
-	{filetype: "go", exts: []string{".go"}, kws: kwList([]string{"package", "import", "func", "type", "struct", "interface", "if", "else", "for", "range", "return", "map|", "string|", "int|", "bool|", "error|"}), lineCmt: "//"},
-	{filetype: "rust", exts: []string{".rs"}, kws: kwList([]string{"fn", "let", "mut", "if", "else", "match", "impl", "struct", "enum", "use", "pub", "String|", "Vec|"}), lineCmt: "//"},
+	{filetype: "c", exts: []string{".c", ".h"}, kws: kwList([]string{"if", "else", "for", "while", "switch", "case", "return", "struct|", "int|", "char|", "void|"}), lineCmt: "//", blkCmtS: "/*", blkCmtE: "*/"},
+	{filetype: "go", exts: []string{".go"}, kws: kwList([]string{"package", "import", "func", "type", "struct", "interface", "if", "else", "for", "range", "return", "map|", "string|", "int|", "bool|", "error|"}), lineCmt: "//", blkCmtS: "/*", blkCmtE: "*/"},
+	{filetype: "rust", exts: []string{".rs"}, kws: kwList([]string{"fn", "let", "mut", "if", "else", "match", "impl", "struct", "enum", "use", "pub", "String|", "Vec|"}), lineCmt: "//", blkCmtS: "/*", blkCmtE: "*/"},
 	{filetype: "python", exts: []string{".py"}, kws: kwList([]string{"def", "class", "if", "elif", "else", "for", "while", "return", "import", "from", "None", "True", "False"}), lineCmt: "#"},
 }
 
@@ -35,9 +44,15 @@ func keywordKind(kws []keyword, token []byte) (uint8, bool) {
 	return 0, false
 }
 
-func updateSyntax(r *row, force bool) {
+func updateSyntax(r *row, force bool) bool {
+	prevHlState := 0
+	if r.idx > 0 {
+		prevHlState = E.rows[r.idx-1].hlState
+	}
 	if !force && !r.needsHighlight {
-		return
+		// Even if we don't re-parse the line, we need to return if the state changed
+		// to allow propagation.
+		return false
 	}
 	r.needsHighlight = false
 	n := len(r.s)
@@ -50,31 +65,47 @@ func updateSyntax(r *row, force bool) {
 		}
 	}
 	if E.syntax == nil {
-		return
+		r.hlState = 0
+		return false
 	}
+
 	lineCmt := E.syntax.lineCmt
 	lineCmtB := []byte(lineCmt)
 	lineCmtLen := len(lineCmtB)
-	lineCmtFirst := byte(0)
-	if lineCmtLen > 0 {
-		lineCmtFirst = lineCmtB[0]
-	}
+	
+	blkS := []byte(E.syntax.blkCmtS)
+	blkE := []byte(E.syntax.blkCmtE)
+	inBlk := prevHlState != 0
+
 	for i := 0; i < n; {
-		if lineCmtLen > 0 && r.s[i] == lineCmtFirst {
-			isLineComment := false
-			if lineCmtLen == 1 {
-				isLineComment = true
-			} else if lineCmtLen == 2 {
-				isLineComment = i+1 < n && r.s[i+1] == lineCmtB[1]
-			} else if i+lineCmtLen <= n {
-				isLineComment = bytes.Equal(r.s[i:i+lineCmtLen], lineCmtB)
-			}
-			if isLineComment {
-				for j := i; j < n; j++ {
-					r.hl[j] = hlComment
+		if inBlk {
+			r.hl[i] = hlComment
+			if len(blkE) > 0 && i+len(blkE) <= n && bytes.Equal(r.s[i:i+len(blkE)], blkE) {
+				for j := 0; j < len(blkE); j++ {
+					r.hl[i+j] = hlComment
 				}
-				break
+				i += len(blkE)
+				inBlk = false
+				continue
 			}
+			i++
+			continue
+		}
+
+		if len(blkS) > 0 && i+len(blkS) <= n && bytes.Equal(r.s[i:i+len(blkS)], blkS) {
+			inBlk = true
+			for j := 0; j < len(blkS); j++ {
+				r.hl[i+j] = hlComment
+			}
+			i += len(blkS)
+			continue
+		}
+
+		if lineCmtLen > 0 && i+lineCmtLen <= n && bytes.Equal(r.s[i:i+lineCmtLen], lineCmtB) {
+			for j := i; j < n; j++ {
+				r.hl[j] = hlComment
+			}
+			break
 		}
 		if r.s[i] == '"' || r.s[i] == '\'' {
 			q := r.s[i]
@@ -120,6 +151,15 @@ func updateSyntax(r *row, force bool) {
 		}
 		i++
 	}
+	
+	newHlState := 0
+	if inBlk {
+		newHlState = 1
+	}
+	
+	stateChanged := r.hlState != newHlState
+	r.hlState = newHlState
+
 	if len(E.searchBytes) > 0 {
 		q := E.searchBytes
 		for off := 0; ; {
@@ -138,11 +178,15 @@ func updateSyntax(r *row, force bool) {
 			off = m + 1
 		}
 	}
+	return stateChanged
 }
 
 func updateAllSyntax(force bool) {
 	for i := range E.rows {
-		updateSyntax(E.rows[i], force)
+		changed := updateSyntax(E.rows[i], force)
+		if changed && i+1 < len(E.rows) {
+			E.rows[i+1].needsHighlight = true
+		}
 	}
 }
 

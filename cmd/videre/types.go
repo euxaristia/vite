@@ -66,6 +66,7 @@ type row struct {
 	hl             []uint8
 	open           bool
 	needsHighlight bool
+	hlState        int
 }
 
 type reg struct {
@@ -77,13 +78,6 @@ type undoState struct {
 	rows []*row
 	cx   int
 	cy   int
-}
-
-type syntax struct {
-	filetype string
-	exts     []string
-	kws      []keyword
-	lineCmt  string
 }
 
 type keyword struct {

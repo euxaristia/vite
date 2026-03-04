@@ -41,18 +41,24 @@ func runeDisplayWidth(r rune) int {
 	if r < 0x20 || (r >= 0x7F && r < 0xA0) {
 		return 0
 	}
+	// Combining characters, zero-width joiners, variation selectors
 	if (r >= 0x0300 && r <= 0x036F) || (r >= 0x1AB0 && r <= 0x1AFF) ||
 		(r >= 0x1DC0 && r <= 0x1DFF) || (r >= 0x20D0 && r <= 0x20FF) ||
 		(r >= 0xFE20 && r <= 0xFE2F) || r == 0x200D ||
 		(r >= 0xFE00 && r <= 0xFE0F) {
 		return 0
 	}
+	// East Asian Fullwidth/Wide characters
 	if (r >= 0x1100 && r <= 0x115F) || (r >= 0x2329 && r <= 0x232A) ||
 		(r >= 0x2E80 && r <= 0xA4CF) || (r >= 0xAC00 && r <= 0xD7A3) ||
 		(r >= 0xF900 && r <= 0xFAFF) || (r >= 0xFE10 && r <= 0xFE19) ||
 		(r >= 0xFE30 && r <= 0xFE6F) || (r >= 0xFF00 && r <= 0xFF60) ||
-		(r >= 0xFFE0 && r <= 0xFFE6) || (r >= 0x1F300 && r <= 0x1FAFF) ||
-		(r >= 0x2600 && r <= 0x27BF) {
+		(r >= 0xFFE0 && r <= 0xFFE6) {
+		return 2
+	}
+	// Emoji ranges (approximate)
+	if (r >= 0x1F300 && r <= 0x1F64F) || (r >= 0x1F680 && r <= 0x1F6FF) ||
+		(r >= 0x1F900 && r <= 0x1F9FF) || (r >= 0x2600 && r <= 0x27BF) {
 		return 2
 	}
 	return 1
