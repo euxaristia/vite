@@ -132,6 +132,36 @@ func BenchmarkVidereDrawRows(b *testing.B) {
 	}
 }
 
+func BenchmarkVidereUpdateAllSyntaxLazy(b *testing.B) {
+	lines := make([]string, 10000)
+	for i := range lines {
+		lines[i] = "func main() { fmt.Println(\"Hello, World!\") } // line comment"
+	}
+	seedEditor(lines, 0, 0)
+	E.filename = "test.go"
+	selectSyntax() // This will force update all once
+	
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		updateAllSyntax(false)
+	}
+}
+
+func BenchmarkVidereUpdateAllSyntaxForced(b *testing.B) {
+	lines := make([]string, 10000)
+	for i := range lines {
+		lines[i] = "func main() { fmt.Println(\"Hello, World!\") } // line comment"
+	}
+	seedEditor(lines, 0, 0)
+	E.filename = "test.go"
+	selectSyntax()
+	
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		updateAllSyntax(true)
+	}
+}
+
 func BenchmarkVidereSaveFile(b *testing.B) {
 	lines := make([]string, 1000)
 	for i := range lines {

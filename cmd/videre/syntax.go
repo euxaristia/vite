@@ -35,7 +35,11 @@ func keywordKind(kws []keyword, token []byte) (uint8, bool) {
 	return 0, false
 }
 
-func updateSyntax(r *row) {
+func updateSyntax(r *row, force bool) {
+	if !force && !r.needsHighlight {
+		return
+	}
+	r.needsHighlight = false
 	n := len(r.s)
 	if cap(r.hl) < len(r.s) {
 		r.hl = make([]uint8, n)
@@ -136,16 +140,16 @@ func updateSyntax(r *row) {
 	}
 }
 
-func updateAllSyntax() {
+func updateAllSyntax(force bool) {
 	for i := range E.rows {
-		updateSyntax(&E.rows[i])
+		updateSyntax(&E.rows[i], force)
 	}
 }
 
 func selectSyntax() {
 	E.syntax = nil
 	if E.filename == "" {
-		updateAllSyntax()
+		updateAllSyntax(true)
 		return
 	}
 	ext := strings.ToLower(filepath.Ext(E.filename))
@@ -153,12 +157,12 @@ func selectSyntax() {
 		for _, e := range syntaxes[i].exts {
 			if e == ext {
 				E.syntax = &syntaxes[i]
-				updateAllSyntax()
+				updateAllSyntax(true)
 				return
 			}
 		}
 	}
-	updateAllSyntax()
+	updateAllSyntax(true)
 }
 
 func setSearchPattern(p string) {

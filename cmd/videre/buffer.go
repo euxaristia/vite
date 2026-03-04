@@ -85,7 +85,7 @@ func insertRow(at int, s []byte) {
 	for i := at; i < len(E.rows); i++ {
 		E.rows[i].idx = i
 	}
-	updateSyntax(&E.rows[at])
+	updateSyntax(&E.rows[at], false)
 	E.dirty = true
 }
 
@@ -107,7 +107,7 @@ func rowInsertChar(r *row, at int, c byte) {
 	r.s = append(r.s, 0)
 	copy(r.s[at+1:], r.s[at:])
 	r.s[at] = c
-	updateSyntax(r)
+	updateSyntax(r, false)
 	E.dirty = true
 }
 
@@ -117,13 +117,13 @@ func rowDelChar(r *row, at int) {
 	}
 	copy(r.s[at:], r.s[at+1:])
 	r.s = r.s[:len(r.s)-1]
-	updateSyntax(r)
+	updateSyntax(r, false)
 	E.dirty = true
 }
 
 func rowAppendString(r *row, s []byte) {
 	r.s = append(r.s, s...)
-	updateSyntax(r)
+	updateSyntax(r, false)
 	E.dirty = true
 }
 
@@ -148,7 +148,7 @@ func applyState(s undoState) {
 	E.cx = s.cx
 	E.cy = s.cy
 	E.dirty = true
-	updateAllSyntax()
+	updateAllSyntax(true)
 }
 
 func doUndo() {
@@ -296,6 +296,7 @@ func insertChar(c byte) {
 		insertRow(len(E.rows), nil)
 	}
 	rowInsertChar(&E.rows[E.cy], E.cx, c)
+	E.rows[E.cy].needsHighlight = true
 	E.cx = utf8NextBoundary(E.rows[E.cy].s, E.cx)
 	E.preferred = E.cx
 }
@@ -308,7 +309,7 @@ func insertNewline() {
 		r := &E.rows[E.cy]
 		insertRow(E.cy+1, r.s[E.cx:])
 		r.s = append([]byte(nil), r.s[:E.cx]...)
-		updateSyntax(r)
+		updateSyntax(r, false)
 	}
 	E.cy++
 	E.cx = 0
@@ -324,10 +325,12 @@ func delChar() {
 		r := &E.rows[E.cy]
 		prev := utf8PrevBoundary(r.s, E.cx)
 		rowDelChar(r, prev)
+		r.needsHighlight = true
 		E.cx = prev
 	} else {
 		E.cx = len(E.rows[E.cy-1].s)
 		rowAppendString(&E.rows[E.cy-1], E.rows[E.cy].s)
+		E.rows[E.cy-1].needsHighlight = true
 		delRow(E.cy)
 		E.cy--
 	}

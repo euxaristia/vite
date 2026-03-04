@@ -118,6 +118,7 @@ func drawRows(b *bytes.Buffer) {
 				b.WriteString(" \x1b[m")
 			}
 			rowData := &E.rows[fr]
+			updateSyntax(rowData, false)
 			line := rowData.s
 			start := utf8SnapBoundary(line, E.coloff)
 			if start > len(line) {
@@ -463,6 +464,7 @@ func scroll() {
 }
 
 func refreshScreen() {
+	updateAllSyntax(false)
 	scroll()
 	screenBuf.Reset()
 	screenBuf.WriteString("\x1b[?25l\x1b[H")

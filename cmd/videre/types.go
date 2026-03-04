@@ -61,10 +61,11 @@ const (
 )
 
 type row struct {
-	idx  int
-	s    []byte
-	hl   []uint8
-	open bool
+	idx            int
+	s              []byte
+	hl             []uint8
+	open           bool
+	needsHighlight bool
 }
 
 type reg struct {

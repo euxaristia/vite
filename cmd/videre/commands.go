@@ -39,7 +39,7 @@ func changeCase(toUpper bool) {
 				line[i] = byte(unicode.ToLower(rune(line[i])))
 			}
 		}
-		updateSyntax(&E.rows[y])
+		updateSyntax(&E.rows[y], false)
 	}
 	E.dirty = true
 	E.mode = modeNormal
@@ -67,7 +67,7 @@ func indentSelection(indent bool) {
 				E.rows[y].s = E.rows[y].s[trim:]
 			}
 		}
-		updateSyntax(&E.rows[y])
+		updateSyntax(&E.rows[y], false)
 	}
 	E.dirty = true
 	E.mode = modeNormal
@@ -199,7 +199,8 @@ func incrementNumber(delta int) {
 		E.cx = 0
 	}
 	E.preferred = E.cx
-	updateSyntax(&E.rows[E.cy])
+	E.rows[E.cy].needsHighlight = true
+	updateSyntax(&E.rows[E.cy], false)
 	E.dirty = true
 }
 
@@ -294,7 +295,7 @@ func deleteRange(sx, sy, ex, ey int) {
 		}
 		if sx <= ex {
 			r.s = append(r.s[:sx], r.s[ex+1:]...)
-			updateSyntax(r)
+			updateSyntax(r, false)
 		}
 	} else {
 		first := append([]byte(nil), E.rows[sy].s[:sx]...)
@@ -305,7 +306,7 @@ func deleteRange(sx, sy, ex, ey int) {
 			}
 		}
 		E.rows[sy].s = first
-		updateSyntax(&E.rows[sy])
+		updateSyntax(&E.rows[sy], false)
 		for i := 0; i < ey-sy; i++ {
 			delRow(sy + 1)
 		}
@@ -355,7 +356,7 @@ func findCallback(query string, key int) {
 		findDirection = 1
 		if key == 0x1b {
 			setSearchPattern("")
-			updateAllSyntax()
+			updateAllSyntax(true)
 		}
 		return
 	}
@@ -392,7 +393,7 @@ func findCallback(query string, key int) {
 			break
 		}
 	}
-	updateAllSyntax()
+	updateAllSyntax(true)
 }
 
 func find() {
@@ -430,14 +431,14 @@ func findNext(dir int) {
 					if m := bytes.Index(line[curCol:], E.searchBytes); m >= 0 {
 						m += curCol
 						E.cy, E.cx, E.preferred = cur, m, m
-						updateAllSyntax()
+						updateAllSyntax(true)
 						return
 					}
 				}
 			} else {
 				if m := bytes.Index(line, E.searchBytes); m >= 0 {
 					E.cy, E.cx, E.preferred = cur, m, m
-					updateAllSyntax()
+					updateAllSyntax(true)
 					return
 				}
 			}
@@ -452,7 +453,7 @@ func findNext(dir int) {
 			for x := start; x >= 0; x-- {
 				if x+qLen <= len(line) && bytes.Equal(line[x:x+qLen], E.searchBytes) {
 					E.cy, E.cx, E.preferred = cur, x, x
-					updateAllSyntax()
+					updateAllSyntax(true)
 					return
 				}
 			}
@@ -579,7 +580,7 @@ func handleSubstitute(cmd string) {
 
 		if newLine != line {
 			E.rows[y].s = []byte(newLine)
-			updateSyntax(&E.rows[y])
+			updateSyntax(&E.rows[y], false)
 			madeChanges = true
 		}
 	}
@@ -1240,7 +1241,7 @@ func processKeypress() bool {
 					y := E.cy + i
 					if y < len(E.rows) {
 						E.rows[y].s = append([]byte("    "), E.rows[y].s...)
-						updateSyntax(&E.rows[y])
+						updateSyntax(&E.rows[y], false)
 					}
 				}
 				E.dirty = true
@@ -1261,7 +1262,7 @@ func processKeypress() bool {
 						}
 						if trim > 0 {
 							E.rows[y].s = E.rows[y].s[trim:]
-							updateSyntax(&E.rows[y])
+							updateSyntax(&E.rows[y], false)
 						}
 					}
 				}
