@@ -11,6 +11,19 @@ import (
 	"unicode"
 )
 
+func startRecording(initial int) {
+	E.recordingChange = true
+	E.currentChange = []int{initial}
+}
+
+func stopRecording() {
+	if E.recordingChange {
+		E.lastChange = make([]int, len(E.currentChange))
+		copy(E.lastChange, E.currentChange)
+		E.recordingChange = false
+	}
+}
+
 func changeCase(toUpper bool) {
 	if E.mode != modeVisual && E.mode != modeVisualLine {
 		return
@@ -195,6 +208,7 @@ func incrementNumber(delta int) {
 	newLine = append(newLine, line[:i]...)
 	newLine = append(newLine, repl...)
 	newLine = append(newLine, line[j:]...)
+	E.rows[E.cy] = duplicateRow(E.rows[E.cy])
 	E.rows[E.cy].s = newLine
 	E.cx = i + len(repl) - 1
 	if E.cx < 0 {
@@ -913,6 +927,7 @@ func handleOperator(op int, count int) bool {
 		if op == 'c' {
 			E.mode = modeInsert
 			setStatus("-- INSERT --")
+			startRecording(op)
 		}
 		return true
 	}
@@ -928,6 +943,10 @@ func handleOperator(op int, count int) bool {
 		}
 		sx, sy, ex, ey, ok := findTextObject(obj, m == 'i')
 		if ok {
+			if op != 'y' {
+				startRecording(op)
+				E.currentChange = append(E.currentChange, m, obj)
+			}
 			if op == 'y' {
 				yoink(sx, sy, ex, ey, false)
 				return true
@@ -937,6 +956,8 @@ func handleOperator(op int, count int) bool {
 			if op == 'c' {
 				E.mode = modeInsert
 				setStatus("-- INSERT --")
+			} else {
+				stopRecording()
 			}
 			return true
 		}
@@ -944,6 +965,10 @@ func handleOperator(op int, count int) bool {
 	}
 
 	if m == op {
+		if op != 'y' {
+			startRecording(op)
+			E.currentChange = append(E.currentChange, m)
+		}
 		sy := E.cy
 		ey := min(E.cy+count-1, len(E.rows)-1)
 		yoink(0, sy, 0, ey, true)
@@ -961,6 +986,8 @@ func handleOperator(op int, count int) bool {
 		if op == 'c' {
 			E.mode = modeInsert
 			setStatus("-- INSERT --")
+		} else if op != 'y' {
+			stopRecording()
 		}
 		return true
 	}
@@ -969,10 +996,12 @@ func handleOperator(op int, count int) bool {
 	usedMotion := m
 	switch m {
 	case 'g':
-		if readKey() != 'g' {
+		n := readKey()
+		if n != 'g' {
 			return true
 		}
 		moveFileStart()
+		usedMotion = 'g' // Simplify for exclusive check, but actually gg is the motion
 	case 'G':
 		if count > 1 {
 			moveToLine(count)
@@ -1030,6 +1059,13 @@ func handleOperator(op int, count int) bool {
 		}
 	}
 
+	if op != 'y' {
+		startRecording(op)
+		// This is tricky because the motion might have read multiple keys
+		// For now we only support simple motions for repeat
+		E.currentChange = append(E.currentChange, usedMotion)
+	}
+
 	if op == 'y' {
 		yoink(sx, sy, ex, ey, false)
 		E.cx, E.cy, E.preferred = startX, startY, startX
@@ -1040,6 +1076,8 @@ func handleOperator(op int, count int) bool {
 	if op == 'c' {
 		E.mode = modeInsert
 		setStatus("-- INSERT --")
+	} else {
+		stopRecording()
 	}
 	return true
 }
@@ -1050,6 +1088,13 @@ func processKeypress() bool {
 		return false
 	}
 	if c == resizeEvent {
+		return true
+	}
+	if c == '.' {
+		if len(E.lastChange) > 0 && !E.recordingChange {
+			E.keyBuffer = make([]int, len(E.lastChange))
+			copy(E.keyBuffer, E.lastChange)
+		}
 		return true
 	}
 	if E.menuOpen && c != mouseEvent {
@@ -1093,6 +1138,10 @@ func processKeypress() bool {
 				E.mode = modeVisual
 			}
 			return true
+		}
+	}
+	if E.mode == modeInsert {
+		switch c {
 		case '\r':
 			insertNewline()
 		case '\t':
@@ -1106,6 +1155,7 @@ func processKeypress() bool {
 				E.cx--
 			}
 			setStatus("")
+			stopRecording()
 		case backspace, 127, 8:
 			delChar()
 		case delKey:
@@ -1149,6 +1199,7 @@ func processKeypress() bool {
 		E.mode = modeInsert
 		E.selSX, E.selSY = -1, -1
 		setStatus("-- INSERT --")
+		startRecording(c)
 	case 'a':
 		if E.cy >= 0 && E.cy < len(E.rows) && E.cx < len(E.rows[E.cy].s) {
 			E.cx = utf8NextBoundary(E.rows[E.cy].s, E.cx)
@@ -1160,16 +1211,19 @@ func processKeypress() bool {
 		E.mode = modeInsert
 		E.selSX, E.selSY = -1, -1
 		setStatus("-- INSERT --")
+		startRecording(c)
 	case 'I':
 		moveFirstNonWhitespace()
 		E.mode = modeInsert
 		E.selSX, E.selSY = -1, -1
 		setStatus("-- INSERT --")
+		startRecording(c)
 	case 'A':
 		moveLineEnd()
 		E.mode = modeInsert
 		E.selSX, E.selSY = -1, -1
 		setStatus("-- INSERT --")
+		startRecording(c)
 	case 'o':
 		if len(E.rows) == 0 {
 			insertRow(0, nil)
@@ -1182,6 +1236,7 @@ func processKeypress() bool {
 		E.mode = modeInsert
 		E.selSX, E.selSY = -1, -1
 		setStatus("-- INSERT --")
+		startRecording(c)
 	case 'O':
 		if len(E.rows) == 0 {
 			insertRow(0, nil)
@@ -1196,6 +1251,7 @@ func processKeypress() bool {
 		E.mode = modeInsert
 		E.selSX, E.selSY = -1, -1
 		setStatus("-- INSERT --")
+		startRecording(c)
 	case 'v':
 		if E.mode == modeVisual {
 			E.mode = modeNormal
@@ -1251,11 +1307,14 @@ func processKeypress() bool {
 		}
 	case 'd', 'x':
 		if E.mode == modeVisual || E.mode == modeVisualLine {
+			startRecording(c)
 			yoink(E.selSX, E.selSY, E.cx, E.cy, E.mode == modeVisualLine)
 			deleteRange(E.selSX, E.selSY, E.cx, E.cy)
 			E.mode = modeNormal
 			E.selSX, E.selSY = -1, -1
+			stopRecording()
 		} else if c == 'x' {
+			startRecording(c)
 			for i := 0; i < count; i++ {
 				if E.cy < 0 || E.cy >= len(E.rows) || E.cx >= len(E.rows[E.cy].s) {
 					break
@@ -1263,11 +1322,13 @@ func processKeypress() bool {
 				moveCursor(arrowRight)
 				delChar()
 			}
+			stopRecording()
 		} else {
 			return handleOperator(c, count)
 		}
 	case 'c':
 		if E.mode == modeVisual || E.mode == modeVisualLine {
+			startRecording(c)
 			yoink(E.selSX, E.selSY, E.cx, E.cy, E.mode == modeVisualLine)
 			deleteRange(E.selSX, E.selSY, E.cx, E.cy)
 			E.mode = modeInsert
@@ -1462,9 +1523,13 @@ func processKeypress() bool {
 		_ = applyMotionKey('}', count)
 	case '>':
 		if E.mode == modeVisual || E.mode == modeVisualLine {
+			startRecording(c)
 			indentSelection(true)
+			stopRecording()
 		} else {
 			if readKey() == '>' {
+				startRecording(c)
+				E.currentChange = append(E.currentChange, '>')
 				saveUndo()
 				for i := 0; i < count; i++ {
 					y := E.cy + i
@@ -1475,13 +1540,18 @@ func processKeypress() bool {
 					}
 				}
 				E.dirty = true
+				stopRecording()
 			}
 		}
 	case '<':
 		if E.mode == modeVisual || E.mode == modeVisualLine {
+			startRecording(c)
 			indentSelection(false)
+			stopRecording()
 		} else {
 			if readKey() == '<' {
+				startRecording(c)
+				E.currentChange = append(E.currentChange, '<')
 				saveUndo()
 				for i := 0; i < count; i++ {
 					y := E.cy + i
@@ -1498,6 +1568,7 @@ func processKeypress() bool {
 					}
 				}
 				E.dirty = true
+				stopRecording()
 			}
 		}
 	case 'f', 'F', 't', 'T':

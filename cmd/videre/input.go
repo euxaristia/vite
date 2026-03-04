@@ -133,6 +133,11 @@ func logDebug(format string, v ...interface{}) {
 }
 
 func readKey() int {
+	if len(E.keyBuffer) > 0 {
+		key := E.keyBuffer[0]
+		E.keyBuffer = E.keyBuffer[1:]
+		return key
+	}
 	fd := int(os.Stdin.Fd())
 	first, err := readByte(fd)
 	if err != nil {
@@ -141,170 +146,193 @@ func readKey() int {
 		}
 		die(err)
 	}
+	res := 0
 	if first != 0x1b {
-		return int(first)
-	}
-	if !inputReady(fd) {
-		return 0x1b
-	}
-
-	b, ok, err := readByteTimeout(fd, 1)
-	if err != nil {
-		if errors.Is(err, syscall.EINTR) {
-			return resizeEvent
-		}
-		die(err)
-	}
-	if !ok {
-		return 0x1b
-	}
-
-	if b == '[' {
-		var seq [32]byte
-		seqLen := 0
-		for i := 0; i < 31; i++ {
-			nb, has, rerr := readByteTimeout(fd, 1)
-			if rerr != nil {
-				if errors.Is(rerr, syscall.EINTR) {
-					return resizeEvent
-				}
-				die(rerr)
+		res = int(first)
+	} else if !inputReady(fd) {
+		res = 0x1b
+	} else {
+		b, ok, err := readByteTimeout(fd, 1)
+		if err != nil {
+			if errors.Is(err, syscall.EINTR) {
+				return resizeEvent
 			}
-			if !has {
-				break
-			}
-			seq[seqLen] = nb
-			seqLen++
-			if nb == '~' || nb == 'm' || nb == 'M' || (nb >= 'A' && nb <= 'Z') || (nb >= 'a' && nb <= 'z') {
-				break
-			}
+			die(err)
 		}
-		if seqLen == 0 {
-			return 0x1b
-		}
-		seqb := seq[:seqLen]
-		if len(seqb) == 4 && seqb[0] == '2' && seqb[1] == '0' && seqb[2] == '0' && seqb[3] == '~' {
-			var paste bytes.Buffer
-			for {
-				ch, rerr := readByte(fd)
+		if !ok {
+			res = 0x1b
+		} else if b == '[' {
+			var seq [32]byte
+			seqLen := 0
+			for i := 0; i < 31; i++ {
+				nb, has, rerr := readByteTimeout(fd, 1)
 				if rerr != nil {
 					if errors.Is(rerr, syscall.EINTR) {
 						return resizeEvent
 					}
 					die(rerr)
 				}
-				if ch == 0x1b {
-					nb, has, rerr := readByteTimeout(fd, 1)
-					if rerr != nil {
-						die(rerr)
-					}
-					if has && nb == '[' {
-						var endSeq [8]byte
-						endLen := 0
-						for i := 0; i < 5; i++ {
-							b2, has2, _ := readByteTimeout(fd, 1)
-							if !has2 {
-								break
-							}
-							endSeq[endLen] = b2
-							endLen++
-							if b2 == '~' {
-								break
-							}
-						}
-						endb := endSeq[:endLen]
-						if len(endb) == 4 && endb[0] == '2' && endb[1] == '0' && endb[2] == '1' && endb[3] == '~' {
-							E.pasteBuffer = paste.Bytes()
-							return pasteEvent
-						}
-						paste.WriteByte(0x1b)
-						paste.WriteByte('[')
-						paste.Write(endb)
-						continue
-					}
-					paste.WriteByte(0x1b)
-					if has {
-						paste.WriteByte(nb)
-					}
-					continue
+				if !has {
+					break
 				}
-				paste.WriteByte(ch)
-			}
-		}
-		if len(seqb) >= 2 && seqb[0] == '<' && (seqb[len(seqb)-1] == 'm' || seqb[len(seqb)-1] == 'M') {
-			mb, mx, my, ok := parseSGRMouse(seqb)
-			if ok {
-				E.mouseB = mb
-				E.mouseX = mx
-				E.mouseY = my
-				if seqb[len(seqb)-1] == 'm' {
-					E.mouseB |= 0x80
+				seq[seqLen] = nb
+				seqLen++
+				if nb == '~' || nb == 'm' || nb == 'M' || (nb >= 'A' && nb <= 'Z') || (nb >= 'a' && nb <= 'z') {
+					break
 				}
-				return mouseEvent
 			}
-		}
-		if len(seqb) >= 2 && seqb[len(seqb)-1] == '~' && seqb[0] >= '0' && seqb[0] <= '9' {
-			switch seqb[0] {
-			case '1', '7':
-				return homeKey
-			case '3':
-				return delKey
-			case '4', '8':
-				return endKey
-			case '5':
-				return pageUp
-			case '6':
-				return pageDown
+			if seqLen == 0 {
+				res = 0x1b
+			} else {
+				seqb := seq[:seqLen]
+				if len(seqb) == 4 && seqb[0] == '2' && seqb[1] == '0' && seqb[2] == '0' && seqb[3] == '~' {
+					var paste bytes.Buffer
+					for {
+						ch, rerr := readByte(fd)
+						if rerr != nil {
+							if errors.Is(rerr, syscall.EINTR) {
+								return resizeEvent
+							}
+							die(rerr)
+						}
+						if ch == 0x1b {
+							nb, has, rerr := readByteTimeout(fd, 1)
+							if rerr != nil {
+								die(rerr)
+							}
+							if has && nb == '[' {
+								var endSeq [8]byte
+								endLen := 0
+								for i := 0; i < 5; i++ {
+									b2, has2, _ := readByteTimeout(fd, 1)
+									if !has2 {
+										break
+									}
+									endSeq[endLen] = b2
+									endLen++
+									if b2 == '~' {
+										break
+									}
+								}
+								endb := endSeq[:endLen]
+								if len(endb) == 4 && endb[0] == '2' && endb[1] == '0' && endb[2] == '1' && endb[3] == '~' {
+									E.pasteBuffer = paste.Bytes()
+									res = pasteEvent
+									goto end
+								}
+								paste.WriteByte(0x1b)
+								paste.WriteByte('[')
+								paste.Write(endb)
+								continue
+							}
+							paste.WriteByte(0x1b)
+							if has {
+								paste.WriteByte(nb)
+							}
+							continue
+						}
+						paste.WriteByte(ch)
+					}
+				}
+				if len(seqb) >= 2 && seqb[0] == '<' && (seqb[len(seqb)-1] == 'm' || seqb[len(seqb)-1] == 'M') {
+					mb, mx, my, ok := parseSGRMouse(seqb)
+					if ok {
+						E.mouseB = mb
+						E.mouseX = mx
+						E.mouseY = my
+						if seqb[len(seqb)-1] == 'm' {
+							E.mouseB |= 0x80
+						}
+						res = mouseEvent
+						goto end
+					}
+				}
+				if len(seqb) >= 2 && seqb[len(seqb)-1] == '~' && seqb[0] >= '0' && seqb[0] <= '9' {
+					switch seqb[0] {
+					case '1', '7':
+						res = homeKey
+						goto end
+					case '3':
+						res = delKey
+						goto end
+					case '4', '8':
+						res = endKey
+						goto end
+					case '5':
+						res = pageUp
+						goto end
+					case '6':
+						res = pageDown
+						goto end
+					}
+				}
+				if len(seqb) == 5 && seqb[0] == '1' && seqb[1] == ';' && seqb[2] == '2' {
+					switch seqb[4] {
+					case 'A':
+						res = shiftUp
+						goto end
+					case 'B':
+						res = shiftDown
+						goto end
+					case 'C':
+						res = shiftRight
+						goto end
+					case 'D':
+						res = shiftLeft
+						goto end
+					}
+				}
+				if len(seqb) == 5 && seqb[2] == ';' && seqb[3] == '6' && seqb[4] == 'u' && (string(seqb[:2]) == "99" || string(seqb[:2]) == "67") {
+					res = ctrlShiftC
+					goto end
+				}
+				switch seqb[len(seqb)-1] {
+				case 'A':
+					res = arrowUp
+				case 'B':
+					res = arrowDown
+				case 'C':
+					res = arrowRight
+				case 'D':
+					res = arrowLeft
+				case 'H':
+					res = homeKey
+				case 'F':
+					res = endKey
+				default:
+					res = 0x1b
+				}
 			}
-		}
-		if len(seqb) == 5 && seqb[0] == '1' && seqb[1] == ';' && seqb[2] == '2' {
-			switch seqb[4] {
-			case 'A':
-				return shiftUp
-			case 'B':
-				return shiftDown
-			case 'C':
-				return shiftRight
-			case 'D':
-				return shiftLeft
+		} else if b == 'O' {
+			nb, has, rerr := readByteTimeout(fd, 1)
+			if rerr != nil {
+				die(rerr)
 			}
+			if !has {
+				res = 0x1b
+			} else {
+				switch nb {
+				case 'H':
+					res = homeKey
+				case 'F':
+					res = endKey
+				default:
+					unreadByte(b)
+					unreadByte(nb)
+					res = 0x1b
+				}
+			}
+		} else {
+			unreadByte(b)
+			res = 0x1b
 		}
-		if len(seqb) == 5 && seqb[2] == ';' && seqb[3] == '6' && seqb[4] == 'u' && (string(seqb[:2]) == "99" || string(seqb[:2]) == "67") {
-			return ctrlShiftC
-		}
-		switch seqb[len(seqb)-1] {
-		case 'A':
-			return arrowUp
-		case 'B':
-			return arrowDown
-		case 'C':
-			return arrowRight
-		case 'D':
-			return arrowLeft
-		case 'H':
-			return homeKey
-		case 'F':
-			return endKey
-		}
-		return 0x1b
 	}
-	if b == 'O' {
-		nb, has, rerr := readByteTimeout(fd, 1)
-		if rerr != nil {
-			die(rerr)
-		}
-		if !has {
-			return 0x1b
-		}
-		switch nb {
-		case 'H':
-			return homeKey
-		case 'F':
-			return endKey
-		}
+
+end:
+	if E.recordingChange && res != 0 && res != resizeEvent {
+		E.currentChange = append(E.currentChange, res)
 	}
-	unreadByte(b)
-	return 0x1b
+	return res
 }
 
 func enableRawMode() {

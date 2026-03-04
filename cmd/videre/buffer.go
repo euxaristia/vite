@@ -102,6 +102,7 @@ func duplicateRow(r *row) *row {
 		hl:             append([]uint8(nil), r.hl...),
 		open:           r.open,
 		needsHighlight: r.needsHighlight,
+		hlState:        r.hlState,
 	}
 }
 

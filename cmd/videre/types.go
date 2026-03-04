@@ -129,6 +129,10 @@ type editor struct {
 	lastRows          []*row
 	lastRowoff        int
 	lastColoff        int
+	lastChange        []int
+	recordingChange   bool
+	currentChange     []int
+	keyBuffer         []int
 }
 
 var E editor

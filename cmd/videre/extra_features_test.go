@@ -130,6 +130,26 @@ func TestMultilineSyntax(t *testing.T) {
 	}
 }
 
+func TestRepeatCommand(t *testing.T) {
+	seedEditor([]string{"start "}, 5, 0)
+	
+	// Manually record "iabc<ESC>"
+	E.lastChange = []int{'i', 'a', 'b', 'c', 0x1b}
+	
+	// Replay with "."
+	E.keyBuffer = []int{'.'}
+	processKeypress() // Consumes '.' and fills keyBuffer with lastChange
+	
+	// Process the replayed keys
+	for len(E.keyBuffer) > 0 {
+		processKeypress()
+	}
+	
+	if string(E.rows[0].s) != "startabc " {
+		t.Errorf("repeat failed: expected 'startabc ', got %q", string(E.rows[0].s))
+	}
+}
+
 func TestShiftArrowMotions(t *testing.T) {
 	seedEditor([]string{"word1 word2", "", "word3"}, 0, 0)
 	
