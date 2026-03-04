@@ -9,9 +9,9 @@ import (
 
 func seedEditor(lines []string, cx, cy int) {
 	E = editor{mode: modeNormal, selSX: -1, selSY: -1}
-	E.rows = make([]row, len(lines))
+	E.rows = make([]*row, len(lines))
 	for i, ln := range lines {
-		E.rows[i] = row{idx: i, s: []byte(ln)}
+		E.rows[i] = &row{idx: i, s: []byte(ln), needsHighlight: true}
 	}
 	E.cx = cx
 	E.cy = cy

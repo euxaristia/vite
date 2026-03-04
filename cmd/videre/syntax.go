@@ -142,7 +142,7 @@ func updateSyntax(r *row, force bool) {
 
 func updateAllSyntax(force bool) {
 	for i := range E.rows {
-		updateSyntax(&E.rows[i], force)
+		updateSyntax(E.rows[i], force)
 	}
 }
 

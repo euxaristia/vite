@@ -23,6 +23,7 @@ func changeCase(toUpper bool) {
 	}
 	saveUndo()
 	for y := sy; y <= ey && y < len(E.rows); y++ {
+		E.rows[y] = duplicateRow(E.rows[y])
 		line := E.rows[y].s
 		start := 0
 		end := len(line)
@@ -39,7 +40,7 @@ func changeCase(toUpper bool) {
 				line[i] = byte(unicode.ToLower(rune(line[i])))
 			}
 		}
-		updateSyntax(&E.rows[y], false)
+		updateSyntax(E.rows[y], false)
 	}
 	E.dirty = true
 	E.mode = modeNormal
@@ -56,6 +57,7 @@ func indentSelection(indent bool) {
 	}
 	saveUndo()
 	for y := sy; y <= ey && y < len(E.rows); y++ {
+		E.rows[y] = duplicateRow(E.rows[y])
 		if indent {
 			E.rows[y].s = append([]byte("    "), E.rows[y].s...)
 		} else {
@@ -67,7 +69,7 @@ func indentSelection(indent bool) {
 				E.rows[y].s = E.rows[y].s[trim:]
 			}
 		}
-		updateSyntax(&E.rows[y], false)
+		updateSyntax(E.rows[y], false)
 	}
 	E.dirty = true
 	E.mode = modeNormal
@@ -200,7 +202,7 @@ func incrementNumber(delta int) {
 	}
 	E.preferred = E.cx
 	E.rows[E.cy].needsHighlight = true
-	updateSyntax(&E.rows[E.cy], false)
+	updateSyntax(E.rows[E.cy], false)
 	E.dirty = true
 }
 
@@ -286,7 +288,8 @@ func deleteRange(sx, sy, ex, ey int) {
 	}
 	saveUndo()
 	if sy == ey {
-		r := &E.rows[sy]
+		E.rows[sy] = duplicateRow(E.rows[sy])
+		r := E.rows[sy]
 		if sx < 0 {
 			sx = 0
 		}
@@ -298,6 +301,7 @@ func deleteRange(sx, sy, ex, ey int) {
 			updateSyntax(r, false)
 		}
 	} else {
+		E.rows[sy] = duplicateRow(E.rows[sy])
 		first := append([]byte(nil), E.rows[sy].s[:sx]...)
 		if ey < len(E.rows) {
 			last := E.rows[ey].s
@@ -306,7 +310,7 @@ func deleteRange(sx, sy, ex, ey int) {
 			}
 		}
 		E.rows[sy].s = first
-		updateSyntax(&E.rows[sy], false)
+		updateSyntax(E.rows[sy], false)
 		for i := 0; i < ey-sy; i++ {
 			delRow(sy + 1)
 		}
@@ -579,8 +583,9 @@ func handleSubstitute(cmd string) {
 		}
 
 		if newLine != line {
+			E.rows[y] = duplicateRow(E.rows[y])
 			E.rows[y].s = []byte(newLine)
-			updateSyntax(&E.rows[y], false)
+			updateSyntax(E.rows[y], false)
 			madeChanges = true
 		}
 	}
@@ -1240,8 +1245,9 @@ func processKeypress() bool {
 				for i := 0; i < count; i++ {
 					y := E.cy + i
 					if y < len(E.rows) {
+						E.rows[y] = duplicateRow(E.rows[y])
 						E.rows[y].s = append([]byte("    "), E.rows[y].s...)
-						updateSyntax(&E.rows[y], false)
+						updateSyntax(E.rows[y], false)
 					}
 				}
 				E.dirty = true
@@ -1256,13 +1262,14 @@ func processKeypress() bool {
 				for i := 0; i < count; i++ {
 					y := E.cy + i
 					if y < len(E.rows) {
+						E.rows[y] = duplicateRow(E.rows[y])
 						trim := 0
 						for trim < 4 && trim < len(E.rows[y].s) && E.rows[y].s[trim] == ' ' {
 							trim++
 						}
 						if trim > 0 {
 							E.rows[y].s = E.rows[y].s[trim:]
-							updateSyntax(&E.rows[y], false)
+							updateSyntax(E.rows[y], false)
 						}
 					}
 				}

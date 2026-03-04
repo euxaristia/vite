@@ -3,7 +3,7 @@ package main
 func moveCursor(key int) {
 	var r *row
 	if E.cy >= 0 && E.cy < len(E.rows) {
-		r = &E.rows[E.cy]
+		r = E.rows[E.cy]
 	}
 	switch key {
 	case arrowLeft:

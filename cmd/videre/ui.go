@@ -90,8 +90,13 @@ func drawRows(b *bytes.Buffer) {
 		}
 	}
 	var lineNumBuf []byte
+	offsetsChanged := E.rowoff != E.lastRowoff || E.coloff != E.lastColoff
 	for y := 0; y < E.screenRows; y++ {
 		fr := y + E.rowoff
+		if !hasSelection && !offsetsChanged && fr < len(E.rows) && y < len(E.lastRows) && E.rows[fr] == E.lastRows[y] {
+			b.WriteString("\x1b[B") // Move cursor down one line
+			continue
+		}
 		if fr >= len(E.rows) {
 			if len(E.rows) == 0 && y >= E.screenRows/3 && y < E.screenRows/3+len(welcomeLines) {
 				b.WriteString("\x1b[2m~\x1b[m")
@@ -117,7 +122,7 @@ func drawRows(b *bytes.Buffer) {
 				b.Write(lineNumBuf)
 				b.WriteString(" \x1b[m")
 			}
-			rowData := &E.rows[fr]
+			rowData := E.rows[fr]
 			updateSyntax(rowData, false)
 			line := rowData.s
 			start := utf8SnapBoundary(line, E.coloff)
@@ -472,6 +477,24 @@ func refreshScreen() {
 	drawStatusBar(&screenBuf)
 	drawMessageBar(&screenBuf)
 	drawContextMenu(&screenBuf)
+
+	// Save state for differential rendering
+	if cap(E.lastRows) < E.screenRows {
+		E.lastRows = make([]*row, E.screenRows)
+	} else {
+		E.lastRows = E.lastRows[:E.screenRows]
+	}
+	for y := 0; y < E.screenRows; y++ {
+		fr := y + E.rowoff
+		if fr < len(E.rows) {
+			E.lastRows[y] = E.rows[fr]
+		} else {
+			E.lastRows[y] = nil
+		}
+	}
+	E.lastRowoff = E.rowoff
+	E.lastColoff = E.coloff
+
 	g := gutterWidth()
 	gcols := 0
 	if g > 0 {

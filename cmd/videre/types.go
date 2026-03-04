@@ -74,7 +74,7 @@ type reg struct {
 }
 
 type undoState struct {
-	rows []row
+	rows []*row
 	cx   int
 	cy   int
 }
@@ -96,7 +96,7 @@ type editor struct {
 	rowoff, coloff    int
 	screenRows        int
 	screenCols        int
-	rows              []row
+	rows              []*row
 	dirty             bool
 	filename          string
 	gitStatus         string
@@ -132,6 +132,9 @@ type editor struct {
 	syntax            *syntax
 	termOrig          unix.Termios
 	raw               bool
+	lastRows          []*row
+	lastRowoff        int
+	lastColoff        int
 }
 
 var E editor

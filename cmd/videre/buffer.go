@@ -78,15 +78,31 @@ func insertRow(at int, s []byte) {
 	if at < 0 || at > len(E.rows) {
 		return
 	}
-	r := row{idx: at, s: append([]byte(nil), s...)}
-	E.rows = append(E.rows, row{})
+	r := &row{idx: at, s: append([]byte(nil), s...), needsHighlight: true}
+	E.rows = append(E.rows, nil)
 	copy(E.rows[at+1:], E.rows[at:])
 	E.rows[at] = r
 	for i := at; i < len(E.rows); i++ {
-		E.rows[i].idx = i
+		if E.rows[i].idx != i {
+			E.rows[i] = duplicateRow(E.rows[i])
+			E.rows[i].idx = i
+		}
 	}
-	updateSyntax(&E.rows[at], false)
+	updateSyntax(E.rows[at], false)
 	E.dirty = true
+}
+
+func duplicateRow(r *row) *row {
+	if r == nil {
+		return nil
+	}
+	return &row{
+		idx:            r.idx,
+		s:              append([]byte(nil), r.s...),
+		hl:             append([]uint8(nil), r.hl...),
+		open:           r.open,
+		needsHighlight: r.needsHighlight,
+	}
 }
 
 func delRow(at int) {
@@ -95,7 +111,10 @@ func delRow(at int) {
 	}
 	E.rows = append(E.rows[:at], E.rows[at+1:]...)
 	for i := at; i < len(E.rows); i++ {
-		E.rows[i].idx = i
+		if E.rows[i].idx != i {
+			E.rows[i] = duplicateRow(E.rows[i])
+			E.rows[i].idx = i
+		}
 	}
 	E.dirty = true
 }
@@ -127,13 +146,9 @@ func rowAppendString(r *row, s []byte) {
 	E.dirty = true
 }
 
-func cloneRows(src []row) []row {
-	out := make([]row, len(src))
-	for i := range src {
-		out[i].idx = src[i].idx
-		out[i].s = append([]byte(nil), src[i].s...)
-		out[i].open = src[i].open
-	}
+func cloneRows(src []*row) []*row {
+	out := make([]*row, len(src))
+	copy(out, src)
 	return out
 }
 
@@ -295,7 +310,8 @@ func insertChar(c byte) {
 	if E.cy == len(E.rows) {
 		insertRow(len(E.rows), nil)
 	}
-	rowInsertChar(&E.rows[E.cy], E.cx, c)
+	E.rows[E.cy] = duplicateRow(E.rows[E.cy])
+	rowInsertChar(E.rows[E.cy], E.cx, c)
 	E.rows[E.cy].needsHighlight = true
 	E.cx = utf8NextBoundary(E.rows[E.cy].s, E.cx)
 	E.preferred = E.cx
@@ -306,10 +322,11 @@ func insertNewline() {
 	if E.cx == 0 {
 		insertRow(E.cy, nil)
 	} else {
-		r := &E.rows[E.cy]
-		insertRow(E.cy+1, r.s[E.cx:])
-		r.s = append([]byte(nil), r.s[:E.cx]...)
-		updateSyntax(r, false)
+		oldR := E.rows[E.cy]
+		insertRow(E.cy+1, oldR.s[E.cx:])
+		E.rows[E.cy] = duplicateRow(oldR)
+		E.rows[E.cy].s = append([]byte(nil), oldR.s[:E.cx]...)
+		updateSyntax(E.rows[E.cy], false)
 	}
 	E.cy++
 	E.cx = 0
@@ -322,14 +339,16 @@ func delChar() {
 	}
 	saveUndo()
 	if E.cx > 0 {
-		r := &E.rows[E.cy]
+		E.rows[E.cy] = duplicateRow(E.rows[E.cy])
+		r := E.rows[E.cy]
 		prev := utf8PrevBoundary(r.s, E.cx)
 		rowDelChar(r, prev)
 		r.needsHighlight = true
 		E.cx = prev
 	} else {
+		E.rows[E.cy-1] = duplicateRow(E.rows[E.cy-1])
 		E.cx = len(E.rows[E.cy-1].s)
-		rowAppendString(&E.rows[E.cy-1], E.rows[E.cy].s)
+		rowAppendString(E.rows[E.cy-1], E.rows[E.cy].s)
 		E.rows[E.cy-1].needsHighlight = true
 		delRow(E.cy)
 		E.cy--
