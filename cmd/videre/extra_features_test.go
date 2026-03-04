@@ -68,6 +68,41 @@ func TestIndentNormalMode(t *testing.T) {
 	}
 }
 
+func TestTextObjects(t *testing.T) {
+	// Test word objects
+	seedEditor([]string{"  the quick brown  "}, 8, 0) // on 'u' in 'quick'
+	sx, sy, ex, ey, ok := findTextObject('w', true)
+	if !ok || sx != 6 || ex != 10 || sy != 0 || ey != 0 {
+		t.Errorf("iw failed: got (%d,%d)-(%d,%d) ok=%v, want (6,0)-(10,0)", sx, sy, ex, ey, ok)
+	}
+	sx, sy, ex, ey, ok = findTextObject('w', false)
+	if !ok || sx != 6 || ex != 11 || sy != 0 || ey != 0 {
+		t.Errorf("aw failed: got (%d,%d)-(%d,%d) ok=%v, want (6,0)-(11,0)", sx, sy, ex, ey, ok)
+	}
+
+	// Test quote objects
+	seedEditor([]string{"msg := \"hello world\";"}, 10, 0) // inside quotes
+	sx, sy, ex, ey, ok = findTextObject('"', true)
+	if !ok || sx != 8 || ex != 18 || sy != 0 || ey != 0 {
+		t.Errorf("i\" failed: got (%d,%d)-(%d,%d) ok=%v, want (8,0)-(18,0)", sx, sy, ex, ey, ok)
+	}
+	sx, sy, ex, ey, ok = findTextObject('"', false)
+	if !ok || sx != 7 || ex != 19 || sy != 0 || ey != 0 {
+		t.Errorf("a\" failed: got (%d,%d)-(%d,%d) ok=%v, want (7,0)-(19,0)", sx, sy, ex, ey, ok)
+	}
+
+	// Test bracket objects
+	seedEditor([]string{"func(a, (b, c), d) {"}, 10, 0) // inside (b, c)
+	sx, sy, ex, ey, ok = findTextObject('(', true)
+	if !ok || sx != 9 || ex != 12 || sy != 0 || ey != 0 {
+		t.Errorf("i( failed: got (%d,%d)-(%d,%d) ok=%v, want (9,0)-(12,0)", sx, sy, ex, ey, ok)
+	}
+	sx, sy, ex, ey, ok = findTextObject('(', false)
+	if !ok || sx != 8 || ex != 13 || sy != 0 || ey != 0 {
+		t.Errorf("a( failed: got (%d,%d)-(%d,%d) ok=%v, want (8,0)-(13,0)", sx, sy, ex, ey, ok)
+	}
+}
+
 func TestShiftArrowMotions(t *testing.T) {
 	seedEditor([]string{"word1 word2", "", "word3"}, 0, 0)
 	

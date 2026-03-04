@@ -720,6 +720,194 @@ func prevPos(x, y int) (int, int, bool) {
 	return utf8PrevBoundary(E.rows[py].s, len(E.rows[py].s)), py, true
 }
 
+func isDelimiter(c byte) bool {
+	return strings.ContainsRune(" \t()[]{}<>\"'`", rune(c))
+}
+
+func findTextObject(obj int, inner bool) (sx, sy, ex, ey int, ok bool) {
+	if len(E.rows) == 0 {
+		return 0, 0, 0, 0, false
+	}
+	line := E.rows[E.cy].s
+	if len(line) == 0 {
+		return 0, 0, 0, 0, false
+	}
+
+	switch obj {
+	case 'w', 'W':
+		big := obj == 'W'
+		sx, ex = E.cx, E.cx
+		// Find start of word
+		for sx > 0 {
+			prev := line[sx-1]
+			if big {
+				if prev == ' ' || prev == '\t' {
+					break
+				}
+			} else {
+				if !isWordChar(prev) {
+					break
+				}
+			}
+			sx--
+		}
+		// Find end of word
+		for ex < len(line)-1 {
+			next := line[ex+1]
+			if big {
+				if next == ' ' || next == '\t' {
+					break
+				}
+			} else {
+				if !isWordChar(next) {
+					break
+				}
+			}
+			ex++
+		}
+		if !inner {
+			// Include trailing whitespace
+			for ex < len(line)-1 && (line[ex+1] == ' ' || line[ex+1] == '\t') {
+				ex++
+			}
+		}
+		return sx, E.cy, ex, E.cy, true
+
+	case '"', '\'', '`':
+		delim := byte(obj)
+		sx, ex = -1, -1
+		// Search backwards for the opening delimiter
+		for x := E.cx; x >= 0; x-- {
+			if line[x] == delim {
+				sx = x
+				break
+			}
+		}
+		// Search forwards for the closing delimiter
+		for x := E.cx; x < len(line); x++ {
+			if line[x] == delim {
+				ex = x
+				break
+			}
+		}
+		if sx == -1 || ex == -1 || sx == ex {
+			// If not found surrounding, try finding on current line
+			sx, ex = -1, -1
+			for x := 0; x < len(line); x++ {
+				if line[x] == delim {
+					if sx == -1 {
+						sx = x
+					} else {
+						ex = x
+						if E.cx >= sx && E.cx <= ex {
+							break
+						}
+						sx, ex = x, -1
+					}
+				}
+			}
+		}
+		if sx != -1 && ex != -1 {
+			if inner {
+				return sx + 1, E.cy, ex - 1, E.cy, true
+			}
+			return sx, E.cy, ex, E.cy, true
+		}
+
+	case '(', ')', 'b', '[', ']', '{', '}', 'B', '<', '>':
+		open, close := byte(0), byte(0)
+		switch obj {
+		case '(', ')', 'b':
+			open, close = '(', ')'
+		case '[', ']':
+			open, close = '[', ']'
+		case '{', '}', 'B':
+			open, close = '{', '}'
+		case '<', '>':
+			open, close = '<', '>'
+		}
+		
+		// Find surrounding brackets with nesting support
+		sy, sx = E.cy, E.cx
+		depth := 0
+		foundOpen := false
+		for sy >= 0 {
+			line := E.rows[sy].s
+			start := sx
+			if sy < E.cy {
+				start = len(line) - 1
+			}
+			for x := start; x >= 0; x-- {
+				if line[x] == close {
+					depth++
+				} else if line[x] == open {
+					if depth == 0 {
+						sx, foundOpen = x, true
+						break
+					}
+					depth--
+				}
+			}
+			if foundOpen {
+				break
+			}
+			sy--
+		}
+		if !foundOpen {
+			return 0, 0, 0, 0, false
+		}
+
+		ey, ex = E.cy, E.cx
+		depth = 0
+		foundClose := false
+		for ey < len(E.rows) {
+			line := E.rows[ey].s
+			start := ex
+			if ey > E.cy {
+				start = 0
+			}
+			for x := start; x < len(line); x++ {
+				if line[x] == open {
+					depth++
+				} else if line[x] == close {
+					if depth == 0 {
+						ex, foundClose = x, true
+						break
+					}
+					depth--
+				}
+			}
+			if foundClose {
+				break
+			}
+			ey++
+		}
+		if foundClose {
+			if inner {
+				isx, isy, iex, iey := sx, sy, ex, ey
+				isx, isy, _ = nextPos(isx, isy)
+				iex, iey, _ = prevPos(iex, iey)
+				return isx, isy, iex, iey, true
+			}
+			return sx, sy, ex, ey, true
+		}
+	}
+	return 0, 0, 0, 0, false
+}
+
+func nextPos(x, y int) (int, int, bool) {
+	if len(E.rows) == 0 || y < 0 || y >= len(E.rows) {
+		return 0, 0, false
+	}
+	if x < len(E.rows[y].s) {
+		return utf8NextBoundary(E.rows[y].s, x), y, true
+	}
+	if y >= len(E.rows)-1 {
+		return x, y, false
+	}
+	return 0, y + 1, true
+}
+
 func handleOperator(op int, count int) bool {
 	if len(E.rows) == 0 {
 		if op == 'c' {
@@ -732,6 +920,29 @@ func handleOperator(op int, count int) bool {
 	if m == resizeEvent {
 		return true
 	}
+
+	if m == 'i' || m == 'a' {
+		obj := readKey()
+		if obj == resizeEvent {
+			return true
+		}
+		sx, sy, ex, ey, ok := findTextObject(obj, m == 'i')
+		if ok {
+			if op == 'y' {
+				yoink(sx, sy, ex, ey, false)
+				return true
+			}
+			yoink(sx, sy, ex, ey, false)
+			deleteRange(sx, sy, ex, ey)
+			if op == 'c' {
+				E.mode = modeInsert
+				setStatus("-- INSERT --")
+			}
+			return true
+		}
+		return true
+	}
+
 	if m == op {
 		sy := E.cy
 		ey := min(E.cy+count-1, len(E.rows)-1)
@@ -867,8 +1078,21 @@ func processKeypress() bool {
 		}
 		return true
 	}
-	if E.mode == modeInsert {
+	if E.mode == modeVisual || E.mode == modeVisualLine {
 		switch c {
+		case 'i', 'a':
+			obj := readKey()
+			if obj == resizeEvent {
+				return true
+			}
+			sx, sy, ex, ey, ok := findTextObject(obj, c == 'i')
+			if ok {
+				E.selSX, E.selSY = sx, sy
+				E.cx, E.cy = ex, ey
+				E.preferred = E.cx
+				E.mode = modeVisual
+			}
+			return true
 		case '\r':
 			insertNewline()
 		case '\t':
