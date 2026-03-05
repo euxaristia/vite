@@ -17,6 +17,8 @@ logs/
 help.txt
 test_output.log
 videre
+videre_experimental
+test
 !cmd/videre/
 !cmd/videre/*.go
 !cmd/videre/main_test.go
