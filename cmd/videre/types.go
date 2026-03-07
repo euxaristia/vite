@@ -122,7 +122,6 @@ type editor struct {
 	undo              []undoState
 	redo              []undoState
 	countPrefix       int
-	syntax            *syntax
 	lastRows          []*row
 	lastRowoff        int
 	lastColoff        int
