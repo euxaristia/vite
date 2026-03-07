@@ -49,6 +49,8 @@ func initEditor() {
 	w, h := s.Size()
 	E.screenCols = w
 	E.screenRows = h - 2 // Status bar and message bar
+
+	E.LSP = startLSP()
 }
 
 func main() {

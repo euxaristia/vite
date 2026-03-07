@@ -129,6 +129,7 @@ type editor struct {
 	recordingChange   bool
 	currentChange     []int
 	keyBuffer         []int
+	LSP               *lspClient
 }
 
 var E editor

@@ -12,6 +12,7 @@ require (
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/smacker/go-tree-sitter v0.0.0-20240827094217-dd81d9e9be82 // indirect
+	github.com/sourcegraph/jsonrpc2 v0.2.1 // indirect
 	golang.org/x/term v0.40.0 // indirect
 	golang.org/x/text v0.31.0 // indirect
 )
