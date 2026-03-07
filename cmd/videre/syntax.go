@@ -6,6 +6,7 @@ import (
 	"regexp"
 
 	sitter "github.com/smacker/go-tree-sitter"
+	"github.com/smacker/go-tree-sitter/c"
 	"github.com/smacker/go-tree-sitter/golang"
 	"github.com/smacker/go-tree-sitter/rust"
 )
@@ -32,6 +33,8 @@ func updateSyntax(r *row, force bool) bool {
 		lang = golang.GetLanguage()
 	case ".rs":
 		lang = rust.GetLanguage()
+	case ".c", ".h":
+		lang = c.GetLanguage()
 	}
 
 	if lang != nil {
@@ -71,13 +74,13 @@ func applyTreeSitterHighlight(r *row, n *sitter.Node) {
 		switch kind {
 		case "comment", "line_comment", "block_comment":
 			hl = hlComment
-		case "string_literal", "raw_string_literal", "char_literal":
+		case "string_literal", "raw_string_literal", "char_literal", "string_content":
 			hl = hlString
-		case "int_literal", "float_literal", "imaginary_literal", "integer_literal":
+		case "int_literal", "float_literal", "imaginary_literal", "integer_literal", "number_literal":
 			hl = hlNumber
-		case "func", "package", "import", "type", "struct", "interface", "return", "if", "else", "for", "range", "go", "defer", "map", "chan", "var", "const", "fn", "let", "mut", "match", "impl", "enum", "use", "pub", "mod", "trait", "where", "async", "await":
+		case "func", "package", "import", "type", "struct", "interface", "return", "if", "else", "for", "range", "go", "defer", "map", "chan", "var", "const", "fn", "let", "mut", "match", "impl", "enum", "use", "pub", "mod", "trait", "where", "async", "await", "while", "switch", "case", "default", "do", "break", "continue", "typedef", "extern", "static", "inline", "goto":
 			hl = hlKeyword1
-		case "string", "int", "bool", "error", "byte", "rune", "uint", "uintptr", "float32", "float64", "complex64", "complex128", "String", "Vec", "Option", "Result", "u8", "u16", "u32", "u64", "u128", "i8", "i16", "i32", "i64", "i128", "f32", "f64", "usize", "isize":
+		case "string", "int", "bool", "error", "byte", "rune", "uint", "uintptr", "float32", "float64", "complex64", "complex128", "String", "Vec", "Option", "Result", "u8", "u16", "u32", "u64", "u128", "i8", "i16", "i32", "i64", "i128", "f32", "f64", "usize", "isize", "char", "short", "long", "float", "double", "void", "signed", "unsigned", "size_t", "ssize_t", "int8_t", "int16_t", "int32_t", "int64_t", "uint8_t", "uint16_t", "uint32_t", "uint64_t":
 			hl = hlKeyword2
 		}
 		
