@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os/exec"
+	"path/filepath"
 	"sync"
 
 	"github.com/sourcegraph/jsonrpc2"
@@ -17,14 +18,23 @@ type lspHandler struct{}
 
 func (h *lspHandler) Handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) {
 	if req.Method == "textDocument/publishDiagnostics" {
-		// In a real implementation, we would parse the diagnostics and update the UI.
-		// For this prototype, we just set a status message.
 		setStatus("LSP: Received diagnostics")
 	}
 }
 
 func startLSP() *lspClient {
-	cmd := exec.Command("gopls", "serve")
+	var lspCmd []string
+	ext := filepath.Ext(E.filename)
+	switch ext {
+	case ".go":
+		lspCmd = []string{"gopls", "serve"}
+	case ".rs":
+		lspCmd = []string{"rust-analyzer"}
+	default:
+		return nil
+	}
+
+	cmd := exec.Command(lspCmd[0], lspCmd[1:]...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil { return nil }
 	stdout, err := cmd.StdoutPipe()

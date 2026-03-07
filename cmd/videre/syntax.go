@@ -7,6 +7,7 @@ import (
 
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/golang"
+	"github.com/smacker/go-tree-sitter/rust"
 )
 
 func updateSyntax(r *row, force bool) bool {
@@ -24,9 +25,18 @@ func updateSyntax(r *row, force bool) bool {
 		}
 	}
 
-	if filepath.Ext(E.filename) == ".go" {
+	ext := filepath.Ext(E.filename)
+	var lang *sitter.Language
+	switch ext {
+	case ".go":
+		lang = golang.GetLanguage()
+	case ".rs":
+		lang = rust.GetLanguage()
+	}
+
+	if lang != nil {
 		parser := sitter.NewParser()
-		parser.SetLanguage(golang.GetLanguage())
+		parser.SetLanguage(lang)
 		tree, _ := parser.ParseCtx(context.Background(), nil, r.s)
 		if tree != nil {
 			node := tree.RootNode()
@@ -59,15 +69,15 @@ func applyTreeSitterHighlight(r *row, n *sitter.Node) {
 		
 		var hl uint8 = hlNormal
 		switch kind {
-		case "comment":
+		case "comment", "line_comment", "block_comment":
 			hl = hlComment
-		case "string_literal", "raw_string_literal":
+		case "string_literal", "raw_string_literal", "char_literal":
 			hl = hlString
-		case "int_literal", "float_literal", "imaginary_literal":
+		case "int_literal", "float_literal", "imaginary_literal", "integer_literal":
 			hl = hlNumber
-		case "func", "package", "import", "type", "struct", "interface", "return", "if", "else", "for", "range", "go", "defer", "map", "chan", "var", "const":
+		case "func", "package", "import", "type", "struct", "interface", "return", "if", "else", "for", "range", "go", "defer", "map", "chan", "var", "const", "fn", "let", "mut", "match", "impl", "enum", "use", "pub", "mod", "trait", "where", "async", "await":
 			hl = hlKeyword1
-		case "string", "int", "bool", "error", "byte", "rune", "uint", "uintptr", "float32", "float64", "complex64", "complex128":
+		case "string", "int", "bool", "error", "byte", "rune", "uint", "uintptr", "float32", "float64", "complex64", "complex128", "String", "Vec", "Option", "Result", "u8", "u16", "u32", "u64", "u128", "i8", "i16", "i32", "i64", "i128", "f32", "f64", "usize", "isize":
 			hl = hlKeyword2
 		}
 		
