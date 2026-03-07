@@ -1322,45 +1322,36 @@ func processKeypress() bool {
 			E.Screen.Fini()
 			os.Exit(0)
 		}
-	case 'y':
-		if E.mode == modeVisual || E.mode == modeVisualLine {
-			yoink(E.selSX, E.selSY, E.cx, E.cy, E.mode == modeVisualLine)
-			E.mode = modeNormal
-			E.selSX, E.selSY = -1, -1
-		} else {
-			return handleOperator(c, count)
-		}
-	case 'd', 'x':
-		if E.mode == modeVisual || E.mode == modeVisualLine {
-			startRecording(c)
-			yoink(E.selSX, E.selSY, E.cx, E.cy, E.mode == modeVisualLine)
-			deleteRange(E.selSX, E.selSY, E.cx, E.cy)
-			E.mode = modeNormal
-			E.selSX, E.selSY = -1, -1
-			stopRecording()
-		} else if c == 'x' {
-			startRecording(c)
-			for i := 0; i < count; i++ {
-				if E.cy < 0 || E.cy >= len(E.rows) || E.cx >= len(E.rows[E.cy].s) {
-					break
-				}
-				moveCursor(arrowRight)
-				delChar()
+	case 'y', 'd', 'x', 'c':
+		sx, sy, ex, ey := E.selSX, E.selSY, E.cx, E.cy
+		isLine := E.mode == modeVisualLine
+		if E.mode == modeNormal {
+			sx, sy, ex, ey = E.cx, E.cy, E.cx, E.cy
+			if c == 'd' {
+				// Special case: 'dd' in Vim deletes line. Helix uses 'x' to select line.
+				// We will keep 'handleOperator' for now to support 'dd', 'dw' etc.
+				// but simplify the Visual mode branch.
+				return handleOperator(c, count)
 			}
-			stopRecording()
-		} else {
-			return handleOperator(c, count)
+			if c == 'x' {
+				// 'x' is already a single-char delete in Normal mode
+				ex = min(ex+count-1, len(E.rows[ey].s)-1)
+			}
 		}
-	case 'c':
-		if E.mode == modeVisual || E.mode == modeVisualLine {
-			startRecording(c)
-			yoink(E.selSX, E.selSY, E.cx, E.cy, E.mode == modeVisualLine)
-			deleteRange(E.selSX, E.selSY, E.cx, E.cy)
+
+		startRecording(c)
+		yoink(sx, sy, ex, ey, isLine)
+		if c != 'y' {
+			deleteRange(sx, sy, ex, ey)
+		}
+		
+		if c == 'c' {
 			E.mode = modeInsert
-			E.selSX, E.selSY = -1, -1
 			setStatus("-- INSERT --")
 		} else {
-			return handleOperator(c, count)
+			E.mode = modeNormal
+			E.selSX, E.selSY = -1, -1
+			stopRecording()
 		}
 	case 'p':
 		for i := 0; i < count; i++ {
