@@ -32,6 +32,10 @@ func startLSP() *lspClient {
 		lspCmd = []string{"rust-analyzer"}
 	case ".c", ".h", ".cpp", ".hpp":
 		lspCmd = []string{"clangd"}
+	case ".py":
+		lspCmd = []string{"pylsp"}
+	case ".md":
+		lspCmd = []string{"marksman", "server"}
 	default:
 		return nil
 	}
