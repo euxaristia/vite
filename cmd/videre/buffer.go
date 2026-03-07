@@ -205,6 +205,7 @@ func openFile(name string) bool {
 			E.dirty = false
 			selectSyntax()
 			updateGitStatus()
+			updateAllSyntax(true)
 			setStatus("\"%s\" [New File]", E.filename)
 			return true
 		}
@@ -237,6 +238,7 @@ func openFile(name string) bool {
 	E.dirty = false
 	selectSyntax()
 	updateGitStatus()
+	updateAllSyntax(true)
 	return true
 }
 
