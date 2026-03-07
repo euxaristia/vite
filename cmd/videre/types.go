@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/gdamore/tcell/v2"
 	"golang.org/x/sys/unix"
 )
 
@@ -56,11 +57,6 @@ const (
 	mouseDrag      = 32
 )
 
-const (
-	termEnterSeq = "\x1b[?1049h\x1b[?1003h\x1b[?1006h\x1b[?2004h\x1b[1 q\x1b[2J\x1b[H"
-	termLeaveSeq = "\x1b[?2004l\x1b[?1006l\x1b[?1003l\x1b[0 q\x1b[?1049l\x1b[?25h"
-)
-
 type row struct {
 	idx            int
 	s              []byte
@@ -87,6 +83,7 @@ type keyword struct {
 }
 
 type editor struct {
+	Screen            tcell.Screen
 	cx, cy, preferred int
 	rowoff, coloff    int
 	screenRows        int
@@ -126,8 +123,6 @@ type editor struct {
 	redo              []undoState
 	countPrefix       int
 	syntax            *syntax
-	termOrig          unix.Termios
-	raw               bool
 	lastRows          []*row
 	lastRowoff        int
 	lastColoff        int
@@ -140,10 +135,8 @@ type editor struct {
 var E editor
 var Version = "dev"
 
-var resizePending int32
 var findLastMatch = -1
 var findDirection = 1
 var screenBuf bytes.Buffer
-var cursorNumBuf [32]byte
 
 type winsize = unix.Winsize

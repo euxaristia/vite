@@ -1316,10 +1316,10 @@ func processKeypress() bool {
 	case 'Z':
 		if m := readKey(); m == 'Z' {
 			saveFile()
-			disableRawMode()
+			E.Screen.Fini()
 			os.Exit(0)
 		} else if m == 'Q' {
-			disableRawMode()
+			E.Screen.Fini()
 			os.Exit(0)
 		}
 	case 'y':
@@ -1379,7 +1379,7 @@ func processKeypress() bool {
 			E.quitWarnRemaining--
 			return true
 		}
-		disableRawMode()
+		E.Screen.Fini()
 		os.Exit(0)
 	case ':':
 		rawCmd := prompt(":%s", nil)
@@ -1389,17 +1389,17 @@ func processKeypress() bool {
 			if E.dirty {
 				setStatus("No write since last change (add ! to override)")
 			} else {
-				disableRawMode()
+				E.Screen.Fini()
 				os.Exit(0)
 			}
 		case cmd == "q!" || cmd == "qa!":
-			disableRawMode()
+			E.Screen.Fini()
 			os.Exit(0)
 		case cmd == "w":
 			saveFile()
 		case cmd == "wq":
 			saveFile()
-			disableRawMode()
+			E.Screen.Fini()
 			os.Exit(0)
 		case cmd == "h" || cmd == "help":
 			if E.dirty {

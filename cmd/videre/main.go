@@ -3,11 +3,10 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/signal"
 	"runtime/debug"
 	"strings"
-	"sync/atomic"
-	"syscall"
+
+	"github.com/gdamore/tcell/v2"
 )
 
 const versionBanner = ` ┌──────────────────────────────────────────────────────────────┐
@@ -23,23 +22,36 @@ const versionBanner = ` ┌─────────────────�
  └──────────────────────────────────────────────────────────────┘`
 
 func initEditor() {
-	E = editor{mode: modeNormal, selSX: -1, selSY: -1, quitWarnRemaining: 1, menuSelected: 0}
-	initContextMenuMetrics()
-	updateWindowSize()
+	s, err := tcell.NewScreen()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+	if err := s.Init(); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+
+	defStyle := tcell.StyleDefault.Background(tcell.ColorReset).Foreground(tcell.ColorReset)
+	s.SetStyle(defStyle)
+	s.EnableMouse()
+	s.EnablePaste()
+
+	E = editor{
+		Screen:            s,
+		mode:              modeNormal,
+		selSX:             -1,
+		selSY:             -1,
+		quitWarnRemaining: 1,
+		menuSelected:      0,
+	}
+
+	w, h := s.Size()
+	E.screenCols = w
+	E.screenRows = h - 2 // Status bar and message bar
 }
 
 func main() {
-	defer func() {
-		if r := recover(); r != nil {
-			disableRawMode()
-			fmt.Fprintf(os.Stderr, "videre panic: %v\n", r)
-			_, _ = os.Stderr.Write(debug.Stack())
-			os.Exit(2)
-		}
-	}()
-
-	initEditor()
-
 	for _, arg := range os.Args[1:] {
 		if arg == "--version" || arg == "-V" {
 			fmt.Println(versionBanner)
@@ -53,23 +65,15 @@ func main() {
 		}
 	}
 
-	if _, err := ioctlGetTermios(int(os.Stdin.Fd()), syscall.TCGETS); err != nil {
-		fmt.Fprintln(os.Stderr, "videre requires a TTY on stdin")
-		os.Exit(1)
-	}
-	if _, err := ioctlGetWinsize(int(os.Stdout.Fd()), syscall.TIOCGWINSZ); err != nil {
-		fmt.Fprintln(os.Stderr, "videre requires a TTY on stdout")
-		os.Exit(1)
-	}
-	enableRawMode()
-	defer disableRawMode()
+	initEditor()
+	defer E.Screen.Fini()
 
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGWINCH)
-	go func() {
-		for range sig {
-			updateWindowSize()
-			atomic.StoreInt32(&resizePending, 1)
+	defer func() {
+		if r := recover(); r != nil {
+			E.Screen.Fini()
+			fmt.Fprintf(os.Stderr, "videre panic: %v\n", r)
+			_, _ = os.Stderr.Write(debug.Stack())
+			os.Exit(2)
 		}
 	}()
 

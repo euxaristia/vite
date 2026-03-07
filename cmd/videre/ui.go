@@ -1,40 +1,23 @@
 package main
 
 import (
-	"bytes"
-	"os"
+	"fmt"
 	"strconv"
-	"strings"
-	"syscall"
 	"time"
 	"unicode/utf8"
+
+	"github.com/gdamore/tcell/v2"
 )
 
-func writeCursorPos(b *bytes.Buffer, row, col int) {
-	b.WriteString("\x1b[")
-	n := strconv.AppendInt(cursorNumBuf[:0], int64(row), 10)
-	b.Write(n)
-	b.WriteByte(';')
-	n = strconv.AppendInt(cursorNumBuf[:0], int64(col), 10)
-	b.Write(n)
-	b.WriteByte('H')
-}
-
-func getWindowSize() (int, int) {
-	ws, err := ioctlGetWinsize(int(os.Stdout.Fd()), syscall.TIOCGWINSZ)
-	if err == nil && ws.Col > 0 && ws.Row > 0 {
-		return int(ws.Row), int(ws.Col)
-	}
-	return 24, 80
-}
-
-func updateWindowSize() {
-	r, c := getWindowSize()
-	E.screenRows = r - 2
-	if E.screenRows < 1 {
-		E.screenRows = 1
-	}
-	E.screenCols = c
+var syntaxStyleLUT = map[uint8]tcell.Style{
+	hlNormal:      tcell.StyleDefault.Foreground(tcell.ColorWhite),
+	hlComment:     tcell.StyleDefault.Foreground(tcell.ColorGreen),
+	hlKeyword1:    tcell.StyleDefault.Foreground(tcell.ColorYellow),
+	hlKeyword2:    tcell.StyleDefault.Foreground(tcell.ColorAqua),
+	hlString:      tcell.StyleDefault.Foreground(tcell.ColorDarkMagenta),
+	hlNumber:      tcell.StyleDefault.Foreground(tcell.ColorRed),
+	hlMatch:       tcell.StyleDefault.Foreground(tcell.ColorWhite).Background(tcell.ColorNavy),
+	hlMatchCursor: tcell.StyleDefault.Foreground(tcell.ColorBlack).Background(tcell.ColorYellow),
 }
 
 func runeDisplayWidth(r rune) int {
@@ -64,18 +47,7 @@ func runeDisplayWidth(r rune) int {
 	return 1
 }
 
-var syntaxColorLUT = [...]string{
-	hlNormal:      "\x1b[37m",
-	hlComment:     "\x1b[32m",
-	hlKeyword1:    "\x1b[33m",
-	hlKeyword2:    "\x1b[36m",
-	hlString:      "\x1b[35m",
-	hlNumber:      "\x1b[31m",
-	hlMatch:       "\x1b[34m",
-	hlMatchCursor: "\x1b[33m",
-}
-
-func drawRows(b *bytes.Buffer) {
+func drawRows() {
 	g := gutterWidth()
 	gcols := 0
 	if g > 0 {
@@ -95,144 +67,91 @@ func drawRows(b *bytes.Buffer) {
 			sx, ex = ex, sx
 		}
 	}
-	var lineNumBuf []byte
-	offsetsChanged := E.rowoff != E.lastRowoff || E.coloff != E.lastColoff
+
 	for y := 0; y < E.screenRows; y++ {
 		fr := y + E.rowoff
-		if !hasSelection && !offsetsChanged && fr < len(E.rows) && y < len(E.lastRows) && E.rows[fr] == E.lastRows[y] {
-			b.WriteString("\x1b[B") // Move cursor down one line
-			continue
-		}
 		if fr >= len(E.rows) {
 			if len(E.rows) == 0 && y >= E.screenRows/3 && y < E.screenRows/3+len(welcomeLines) {
-				b.WriteString("\x1b[2m~\x1b[m")
+				E.Screen.SetContent(0, y, '~', nil, tcell.StyleDefault.Foreground(tcell.ColorDimGray))
 				msg := welcomeLines[y-E.screenRows/3]
-				if len(msg) > textCols {
-					msg = msg[:textCols]
-				}
 				padding := (textCols - len(msg)) / 2
-				for i := 0; i < padding; i++ {
-					b.WriteByte(' ')
+				for i, r := range msg {
+					E.Screen.SetContent(gcols+padding+i, y, r, nil, tcell.StyleDefault)
 				}
-				b.WriteString(msg)
 			} else {
-				b.WriteString("\x1b[2m~\x1b[m")
+				E.Screen.SetContent(0, y, '~', nil, tcell.StyleDefault.Foreground(tcell.ColorDimGray))
 			}
-		} else {
-			if g > 0 {
-				b.WriteString("\x1b[2m")
-				lineNumBuf = strconv.AppendInt(lineNumBuf[:0], int64(fr+1), 10)
-				for i := 0; i < g-len(lineNumBuf); i++ {
-					b.WriteByte(' ')
-				}
-				b.Write(lineNumBuf)
-				b.WriteString(" \x1b[m")
-			}
-			rowData := E.rows[fr]
-			updateSyntax(rowData, false)
-			line := rowData.s
-			start := utf8SnapBoundary(line, E.coloff)
-			if start > len(line) {
-				start = len(line)
-			}
-			hl := rowData.hl[start:]
-			visible := line[start:]
-			curColorSeq := ""
-			curSelected := false
-			curReverse := 0
-			rowInSelection := hasSelection && fr >= sy && fr <= ey
-			drawnCols := 0
-			for i := 0; i < len(visible) && drawnCols < textCols; i++ {
-				sel := false
-				if rowInSelection {
-					x := i + start
-					if lineSelection {
-						sel = true
-					} else if fr >= sy && fr <= ey {
-						if sy == ey {
-							sel = x >= sx && x <= ex
-						} else if fr == sy {
-							sel = x >= sx
-						} else if fr == ey {
-							sel = x <= ex
-						} else {
-							sel = true
-						}
-					}
-				}
-				if sel != curSelected {
-					if sel {
-						b.WriteString("\x1b[48;5;242m")
-					} else {
-						b.WriteString("\x1b[49m")
-					}
-					curSelected = sel
-				}
-				h := hl[i]
-				reverse := 0
-				if h == hlMatch {
-					reverse = 1
-				} else if h == hlMatchCursor {
-					reverse = 2
-				}
-				prevReverse := curReverse
-				if reverse != curReverse {
-					curReverse = reverse
-					if curReverse == 1 {
-						b.WriteString("\x1b[7m\x1b[48;5;94m")
-					} else if curReverse == 2 {
-						b.WriteString("\x1b[7m\x1b[48;5;220m")
-					} else {
-						b.WriteString("\x1b[27m")
-					}
-				}
-				if curReverse == 0 {
-					if prevReverse != 0 {
-						curSelected = !sel
-					}
-					if sel != curSelected {
-						if sel {
-							b.WriteString("\x1b[48;5;242m")
-						} else {
-							b.WriteString("\x1b[49m")
-						}
-						curSelected = sel
-					}
-					seq := syntaxColorLUT[hlNormal]
-					if int(h) < len(syntaxColorLUT) {
-						seq = syntaxColorLUT[h]
-					}
-					if seq != curColorSeq {
-						b.WriteString(seq)
-						curColorSeq = seq
-					}
-				}
-				if visible[i] == '\t' {
-					tabCols := 8 - ((gcols + drawnCols) % 8)
-					if tabCols <= 0 {
-						tabCols = 8
-					}
-					remaining := textCols - drawnCols
-					if tabCols > remaining {
-						tabCols = remaining
-					}
-					for s := 0; s < tabCols; s++ {
-						b.WriteByte(' ')
-					}
-					drawnCols += tabCols
-					continue
-				}
-				b.WriteByte(safeTermByte(visible[i]))
-				drawnCols++
-			}
-			b.WriteString("\x1b[27m\x1b[39m\x1b[49m")
+			continue
 		}
-		b.WriteString("\x1b[K\r\n")
+
+		// Draw gutter
+		if g > 0 {
+			lineNum := strconv.Itoa(fr + 1)
+			for i := 0; i < g-len(lineNum); i++ {
+				E.Screen.SetContent(i, y, ' ', nil, tcell.StyleDefault.Foreground(tcell.ColorDimGray))
+			}
+			for i, r := range lineNum {
+				E.Screen.SetContent(g-len(lineNum)+i, y, r, nil, tcell.StyleDefault.Foreground(tcell.ColorDimGray))
+			}
+			E.Screen.SetContent(g, y, ' ', nil, tcell.StyleDefault)
+		}
+
+		rowData := E.rows[fr]
+		updateSyntax(rowData, false)
+		line := rowData.s
+		start := utf8SnapBoundary(line, E.coloff)
+		
+		visible := line[start:]
+		hl := rowData.hl[start:]
+		rowInSelection := hasSelection && fr >= sy && fr <= ey
+		
+		col := 0
+		for i := 0; i < len(visible) && col < textCols; {
+			r, n := utf8.DecodeRune(visible[i:])
+			if n == 0 { break }
+			
+			h := hl[i]
+			style := syntaxStyleLUT[h]
+			
+			// Selection logic
+			sel := false
+			if rowInSelection {
+				x := i + start
+				if lineSelection {
+					sel = true
+				} else {
+					if sy == ey {
+						sel = x >= sx && x <= ex
+					} else if fr == sy {
+						sel = x >= sx
+					} else if fr == ey {
+						sel = x <= ex
+					} else {
+						sel = true
+					}
+				}
+			}
+			if sel {
+				style = style.Background(tcell.ColorDimGray)
+			}
+
+			if r == '\t' {
+				tabW := 8 - ((gcols + col) % 8)
+				for j := 0; j < tabW && col < textCols; j++ {
+					E.Screen.SetContent(gcols+col, y, ' ', nil, style)
+					col++
+				}
+			} else {
+				E.Screen.SetContent(gcols+col, y, r, nil, style)
+				col++
+			}
+			i += n
+		}
 	}
 }
 
-func drawStatusBar(b *bytes.Buffer) {
-	b.WriteString("\x1b[48;5;250m\x1b[38;5;240m")
+func drawStatusBar() {
+	style := tcell.StyleDefault.Background(tcell.ColorLightGray).Foreground(tcell.ColorDarkSlateGray)
 	left := " [No Name]"
 	if E.filename != "" {
 		left = " " + E.filename
@@ -243,7 +162,7 @@ func drawStatusBar(b *bytes.Buffer) {
 	if E.gitStatus != "" {
 		left += " [" + E.gitStatus + "]"
 	}
-	left = safeTermString(left)
+
 	pos := "All"
 	if len(E.rows) > 0 {
 		if E.rowoff == 0 {
@@ -265,110 +184,138 @@ func drawStatusBar(b *bytes.Buffer) {
 				continue
 			}
 			r, n := utf8.DecodeRune(row[i:])
-			if n <= 0 {
-				n = 1
-			}
-			w := runeDisplayWidth(r)
-			if w < 0 {
-				w = 1
-			}
-			rx += w
+			rx += runeDisplayWidth(r)
 			i += n
 		}
 	}
-	var loc [48]byte
-	locB := loc[:0]
-	if len(E.rows) > 0 {
-		locB = strconv.AppendInt(locB, int64(E.cy+1), 10)
-		locB = append(locB, ',')
-		locB = strconv.AppendInt(locB, int64(E.cx+1), 10)
-		locB = append(locB, '-')
-		locB = strconv.AppendInt(locB, int64(rx+1), 10)
-	} else {
-		locB = append(locB, "0,0-1"...)
+	
+	loc := fmt.Sprintf("%d,%d-%d", E.cy+1, E.cx+1, rx+1)
+	right := fmt.Sprintf(" %-14s %s ", loc, pos)
+	
+	for i := 0; i < E.screenCols; i++ {
+		E.Screen.SetContent(i, E.screenRows, ' ', nil, style)
 	}
-	locField := len(locB)
-	if locField < 14 {
-		locField = 14
+	
+	for i, r := range left {
+		if i >= E.screenCols-len(right) { break }
+		E.Screen.SetContent(i, E.screenRows, r, nil, style)
 	}
-	rightLen := 1 + locField + 1 + len(pos)
-	if len(left) > E.screenCols-rightLen {
-		left = left[:max(0, E.screenCols-rightLen)]
+	
+	for i, r := range right {
+		E.Screen.SetContent(E.screenCols-len(right)+i, E.screenRows, r, nil, style)
 	}
-	b.WriteString(left)
-	pad := E.screenCols - rightLen - len(left)
-	for i := 0; i < pad; i++ {
-		b.WriteByte(' ')
-	}
-	b.WriteByte(' ')
-	b.Write(locB)
-	for i := len(locB); i < 14; i++ {
-		b.WriteByte(' ')
-	}
-	b.WriteByte(' ')
-	b.WriteString(pos)
-	b.WriteString("\x1b[m\r\n")
 }
 
-func drawMessageBar(b *bytes.Buffer) {
-	b.WriteString("\x1b[K")
+func drawMessageBar() {
+	style := tcell.StyleDefault
+	y := E.screenRows + 1
+	for i := 0; i < E.screenCols; i++ {
+		E.Screen.SetContent(i, y, ' ', nil, style)
+	}
+
 	if E.statusmsg != "" && time.Since(E.statusTime) < 5*time.Second {
-		msg := safeTermString(E.statusmsg)
-		if len(msg) > E.screenCols {
-			msg = msg[:E.screenCols]
+		for i, r := range E.statusmsg {
+			if i >= E.screenCols { break }
+			E.Screen.SetContent(i, y, r, nil, style)
 		}
-		b.WriteString(msg)
 		return
 	}
+
+	var modeStr string
 	switch E.mode {
 	case modeInsert:
-		b.WriteString("-- INSERT --")
+		modeStr = "-- INSERT --"
 	case modeVisual:
-		b.WriteString("-- VISUAL --")
+		modeStr = "-- VISUAL --"
 	case modeVisualLine:
-		b.WriteString("-- VISUAL LINE --")
+		modeStr = "-- VISUAL LINE --"
+	}
+	for i, r := range modeStr {
+		E.Screen.SetContent(i, y, r, nil, style)
 	}
 }
 
-var menuItems = []string{
-	" Cut       ",
-	" Copy      ",
-	" Paste     ",
-	" Select All ",
-	"----------- ",
-	" Undo      ",
-	" Redo      ",
+func scroll() {
+	if E.rowoff < 0 { E.rowoff = 0 }
+	if E.coloff < 0 { E.coloff = 0 }
+	if len(E.rows) == 0 {
+		E.cx, E.cy, E.preferred = 0, 0, 0
+		return
+	}
+	if E.cy < 0 { E.cy = 0 }
+	if E.cy >= len(E.rows) { E.cy = len(E.rows) - 1 }
+	if E.cx < 0 { E.cx = 0 }
+	if E.cx > len(E.rows[E.cy].s) { E.cx = len(E.rows[E.cy].s) }
+
+	g := gutterWidth()
+	textCols := E.screenCols - g - 1
+	if textCols < 1 { textCols = 1 }
+	
+	if E.cy < E.rowoff { E.rowoff = E.cy }
+	if E.cy >= E.rowoff+E.screenRows { E.rowoff = E.cy - E.screenRows + 1 }
+	if E.cx < E.coloff { E.coloff = E.cx }
+	if E.cx >= E.coloff+textCols { E.coloff = E.cx - textCols + 1 }
 }
 
-var contextMenuW int
-var contextMenuHLine string
-var contextMenuLabels []string
-var contextMenuTopBorder string
-var contextMenuBottomBorder string
+func refreshScreen() {
+	updateAllSyntax(false)
+	scroll()
+	E.Screen.Clear()
+	
+	drawRows()
+	drawStatusBar()
+	drawMessageBar()
+	drawContextMenu()
+	
+	// Cursor positioning
+	g := gutterWidth()
+	gcols := 0
+	if g > 0 { gcols = g + 1 }
+	
+	curY := E.cy - E.rowoff
+	curX := gcols
+	if E.cy >= 0 && E.cy < len(E.rows) {
+		line := E.rows[E.cy].s
+		start := utf8SnapBoundary(line, E.coloff)
+		end := E.cx
+		if end > len(line) { end = len(line) }
+		if end < start { end = start }
+		curX += displayWidthBytes(line[start:end], gcols)
+	}
 
-func initContextMenuMetrics() {
+	if len(E.statusmsg) > 0 && E.statusmsg[0] == ':' {
+		curY = E.screenRows + 1
+		curX = len(E.statusmsg)
+	}
+	
+	E.Screen.ShowCursor(curX, curY)
+	E.Screen.Show()
+}
+
+func gutterWidth() int {
+	if E.filename == "" && len(E.rows) == 0 { return 0 }
+	n := max(1, len(E.rows))
 	w := 1
-	for _, item := range menuItems {
-		if len(item) > w {
-			w = len(item)
-		}
+	for n >= 10 {
+		n /= 10
+		w++
 	}
-	contextMenuW = w
-	contextMenuHLine = strings.Repeat("─", w)
-	contextMenuTopBorder = "\x1b[48;5;235m\x1b[38;5;239m┌" + contextMenuHLine + "┐"
-	contextMenuBottomBorder = "\x1b[48;5;235m\x1b[38;5;239m└" + contextMenuHLine + "┘\x1b[m"
-	contextMenuLabels = make([]string, len(menuItems))
-	for i, item := range menuItems {
-		label := item
-		if i == 4 {
-			label = contextMenuHLine
-		} else if len(label) < w {
-			label += strings.Repeat(" ", w-len(label))
-		} else if len(label) > w {
-			label = label[:w]
+	return w
+}
+
+func displayWidthBytes(s []byte, startCol int) int {
+	col := startCol
+	for i := 0; i < len(s); {
+		r, n := utf8.DecodeRune(s[i:])
+		if n <= 0 { n = 1 }
+		w := runeDisplayWidth(r)
+		if r == '\t' {
+			w = 8 - (col % 8)
 		}
-		contextMenuLabels[i] = label
+		col += w
+		i += n
 	}
+	return col - startCol
 }
 
 var welcomeLines = []string{
@@ -383,172 +330,36 @@ var welcomeLines = []string{
 	"Maintainer: euxaristia",
 }
 
-func drawContextMenu(b *bytes.Buffer) {
-	if !E.menuOpen {
-		return
-	}
-	x := E.menuX
-	y := E.menuY
-	innerW := contextMenuW
-	menuW := innerW + 2
-	menuH := len(menuItems) + 2
-	if x+menuW > E.screenCols {
-		x = E.screenCols - menuW
-	}
-	if y+menuH > E.screenRows {
-		y = E.screenRows - menuH
-	}
-	if x < 1 {
-		x = 1
-	}
-	if y < 1 {
-		y = 1
-	}
-	writeCursorPos(b, y, x)
-	b.WriteString(contextMenuTopBorder)
-	for i := range menuItems {
-		writeCursorPos(b, y+i+1, x)
-		label := contextMenuLabels[i]
-		if i == E.menuSelected {
-			b.WriteString("\x1b[48;5;24m\x1b[38;5;255m│")
-			b.WriteString(label)
-			b.WriteString("│")
-		} else {
-			b.WriteString("\x1b[48;5;235m\x1b[38;5;239m│\x1b[38;5;252m")
-			if i == 4 {
-				b.WriteString("\x1b[38;5;239m")
-			}
-			b.WriteString(label)
-			b.WriteString("\x1b[38;5;239m│")
-		}
-	}
-	writeCursorPos(b, y+len(menuItems)+1, x)
-	b.WriteString(contextMenuBottomBorder)
+var menuItems = []string{
+	" Cut       ",
+	" Copy      ",
+	" Paste     ",
+	" Select All ",
+	"----------- ",
+	" Undo      ",
+	" Redo      ",
 }
 
-func scroll() {
-	if E.rowoff < 0 {
-		E.rowoff = 0
-	}
-	if E.coloff < 0 {
-		E.coloff = 0
-	}
-	if len(E.rows) == 0 {
-		E.cx = 0
-		E.cy = 0
-		E.preferred = 0
-		return
-	}
-	if E.cy < 0 {
-		E.cy = 0
-	}
-	if E.cy >= len(E.rows) {
-		E.cy = len(E.rows) - 1
-	}
-	if E.cx < 0 {
-		E.cx = 0
-	}
-	if E.cx > len(E.rows[E.cy].s) {
-		E.cx = len(E.rows[E.cy].s)
-	}
-	if E.rowoff >= len(E.rows) {
-		E.rowoff = len(E.rows) - 1
-	}
+var contextMenuW int
 
-	g := gutterWidth()
-	textCols := E.screenCols - g - 1
-	if textCols < 1 {
-		textCols = 1
-	}
-	if E.cy < E.rowoff {
-		E.rowoff = E.cy
-	}
-	if E.cy >= E.rowoff+E.screenRows {
-		E.rowoff = E.cy - E.screenRows + 1
-	}
-	if E.cx < E.coloff {
-		E.coloff = E.cx
-	}
-	if E.cx >= E.coloff+textCols {
-		E.coloff = E.cx - textCols + 1
-	}
-}
-
-func refreshScreen() {
-	updateAllSyntax(false)
-	scroll()
-	screenBuf.Reset()
-	screenBuf.WriteString("\x1b[?25l\x1b[H")
-	drawRows(&screenBuf)
-	drawStatusBar(&screenBuf)
-	drawMessageBar(&screenBuf)
-	drawContextMenu(&screenBuf)
-
-	// Save state for differential rendering
-	if cap(E.lastRows) < E.screenRows {
-		E.lastRows = make([]*row, E.screenRows)
-	} else {
-		E.lastRows = E.lastRows[:E.screenRows]
-	}
-	for y := 0; y < E.screenRows; y++ {
-		fr := y + E.rowoff
-		if fr < len(E.rows) {
-			E.lastRows[y] = E.rows[fr]
-		} else {
-			E.lastRows[y] = nil
-		}
-	}
-	E.lastRowoff = E.rowoff
-	E.lastColoff = E.coloff
-
-	g := gutterWidth()
-	gcols := 0
-	if g > 0 {
-		gcols = g + 1
-	}
-	curRow := (E.cy - E.rowoff) + 1
-	if curRow < 1 {
-		curRow = 1
-	}
-	curCol := 1 + g + 1
-	if E.cy >= 0 && E.cy < len(E.rows) {
-		line := E.rows[E.cy].s
-		start := utf8SnapBoundary(line, E.coloff)
-		if start > len(line) {
-			start = len(line)
-		}
-		end := E.cx
-		if end > len(line) {
-			end = len(line)
-		}
-		if end < start {
-			end = start
-		}
-		curCol += displayWidthBytes(line[start:end], gcols)
-	}
-	if curCol < 1 {
-		curCol = 1
-	}
-	if len(E.statusmsg) > 0 && E.statusmsg[0] == ':' {
-		curRow = E.screenRows + 2
-		curCol = len(E.statusmsg) + 1
-	}
-	writeCursorPos(&screenBuf, curRow, curCol)
-	screenBuf.WriteString("\x1b[?25h")
-	_, _ = os.Stdout.Write(screenBuf.Bytes())
-}
-
-func gutterWidth() int {
-	if E.filename == "" && len(E.rows) == 0 {
-		return 0
-	}
-	n := max(1, len(E.rows))
+func initContextMenuMetrics() {
 	w := 1
-	for n >= 10 {
-		n /= 10
-		w++
+	for _, item := range menuItems {
+		if len(item) > w {
+			w = len(item)
+		}
 	}
-	return w
+	contextMenuW = w
+}
+
+func drawContextMenu() {
+	// Implementation for tcell menu if needed
+}
+
+func updateWindowSize() {
+	w, h := E.Screen.Size()
+	E.screenCols = w
+	E.screenRows = h - 2
 }
 
 func byteIndexFromDisplayCol(s []byte, target int, colStart int) int {
@@ -559,49 +370,16 @@ func byteIndexFromDisplayCol(s []byte, target int, colStart int) int {
 	col := colStart
 	for i < len(s) {
 		r, n := utf8.DecodeRune(s[i:])
-		if n <= 0 {
-			n = 1
-		}
+		if n <= 0 { n = 1 }
 		w := runeDisplayWidth(r)
 		if r == '\t' {
 			tabW := 8 - (col % 8)
-			if tabW == 0 {
-				tabW = 8
-			}
+			if tabW == 0 { tabW = 8 }
 			w = tabW
 		}
-		if col+w > target {
-			break
-		}
-		if w < 0 {
-			w = 1
-		}
+		if col+w > target { break }
 		col += w
 		i += n
 	}
 	return i
-}
-
-func displayWidthBytes(s []byte, startCol int) int {
-	col := startCol
-	for i := 0; i < len(s); {
-		r, n := utf8.DecodeRune(s[i:])
-		if n <= 0 {
-			n = 1
-		}
-		w := runeDisplayWidth(r)
-		if r == '\t' {
-			if col%8 == 0 {
-				w = 8
-			} else {
-				w = 8 - (col % 8)
-			}
-		}
-		if w < 0 {
-			w = 1
-		}
-		col += w
-		i += n
-	}
-	return col - startCol
 }
