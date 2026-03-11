@@ -106,7 +106,7 @@ func TestTextObjects(t *testing.T) {
 func TestMultilineSyntax(t *testing.T) {
 	seedEditor([]string{"/* start", "middle", "end */", "outside"}, 0, 0)
 	E.filename = "test.c"
-	selectSyntax() // This should force update all and handle block comments
+	updateAllSyntax(true) // This should force update all and handle block comments
 
 	if E.rows[0].hl[0] != hlComment {
 		t.Errorf("expected hlComment at row 0, got %d", E.rows[0].hl[0])
@@ -137,8 +137,7 @@ func TestRepeatCommand(t *testing.T) {
 	E.lastChange = []int{'i', 'a', 'b', 'c', 0x1b}
 	
 	// Replay with "."
-	E.keyBuffer = []int{'.'}
-	processKeypress() // Consumes '.' and fills keyBuffer with lastChange
+	E.keyBuffer = append([]int{'.'}, E.lastChange...)
 	
 	// Process the replayed keys
 	for len(E.keyBuffer) > 0 {

@@ -1115,13 +1115,6 @@ func processKeypress() bool {
 	if c == resizeEvent {
 		return true
 	}
-	if c == '.' {
-		if len(E.lastChange) > 0 && !E.recordingChange {
-			E.keyBuffer = make([]int, len(E.lastChange))
-			copy(E.keyBuffer, E.lastChange)
-		}
-		return true
-	}
 	if E.menuOpen && c != mouseEvent {
 		E.menuOpen = false
 		if c == 0x1b {

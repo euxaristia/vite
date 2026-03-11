@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -122,13 +121,11 @@ func BenchmarkVidereDrawRows(b *testing.B) {
 	E.screenRows = 24
 	E.screenCols = 80
 	E.filename = "test.go"
-	selectSyntax()
+	updateAllSyntax(true)
 	
-	var buf bytes.Buffer
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		buf.Reset()
-		drawRows(&buf)
+		drawRows()
 	}
 }
 
@@ -139,7 +136,7 @@ func BenchmarkVidereUpdateAllSyntaxLazy(b *testing.B) {
 	}
 	seedEditor(lines, 0, 0)
 	E.filename = "test.go"
-	selectSyntax() // This will force update all once
+	updateAllSyntax(true) // This will force update all once
 	
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -154,7 +151,7 @@ func BenchmarkVidereUpdateAllSyntaxForced(b *testing.B) {
 	}
 	seedEditor(lines, 0, 0)
 	E.filename = "test.go"
-	selectSyntax()
+	updateAllSyntax(true)
 	
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

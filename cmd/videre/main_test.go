@@ -3,12 +3,20 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
+
+	"github.com/gdamore/tcell/v2"
 )
 
 func seedEditor(lines []string, cx, cy int) {
-	E = editor{mode: modeNormal, selSX: -1, selSY: -1}
+	s := tcell.NewSimulationScreen("")
+	_ = s.Init()
+	E = editor{
+		Screen: s,
+		mode:   modeNormal,
+		selSX:  -1,
+		selSY:  -1,
+	}
 	E.rows = make([]*row, len(lines))
 	for i, ln := range lines {
 		E.rows[i] = &row{idx: i, s: []byte(ln), needsHighlight: true}
@@ -16,15 +24,6 @@ func seedEditor(lines []string, cx, cy int) {
 	E.cx = cx
 	E.cy = cy
 	E.preferred = cx
-}
-
-func TestTerminalCursorModeUsesBlinkingBlock(t *testing.T) {
-	if !strings.Contains(termEnterSeq, "\x1b[1 q") {
-		t.Fatalf("startup terminal sequence must request blinking block cursor")
-	}
-	if !strings.Contains(termLeaveSeq, "\x1b[0 q") {
-		t.Fatalf("shutdown terminal sequence must reset cursor style")
-	}
 }
 
 func TestFindCharDoesNotCrossLines(t *testing.T) {

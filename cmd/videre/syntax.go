@@ -24,13 +24,46 @@ func updateSyntax(r *row, force bool) bool {
 	} else if !force && !r.needsHighlight {
 		return false
 	}
-	
+
 	r.needsHighlight = false
 	for i := range r.hl {
 		r.hl[i] = hlNormal
 	}
 
 	ext := filepath.Ext(E.filename)
+
+	// Multiline comment state
+	inComment := false
+	if r.idx > 0 {
+		inComment = E.rows[r.idx-1].hlState == 1
+	}
+
+	if ext == ".c" || ext == ".h" || ext == ".go" || ext == ".rs" {
+		i := 0
+		for i < len(r.s) {
+			if inComment {
+				r.hl[i] = hlComment
+				if i+1 < len(r.s) && r.s[i] == '*' && r.s[i+1] == '/' {
+					r.hl[i+1] = hlComment
+					i += 2
+					inComment = false
+					continue
+				}
+				i++
+				continue
+			}
+
+			if i+1 < len(r.s) && r.s[i] == '/' && r.s[i+1] == '*' {
+				r.hl[i] = hlComment
+				r.hl[i+1] = hlComment
+				i += 2
+				inComment = true
+				continue
+			}
+			i++
+		}
+	}
+
 	var lang *sitter.Language
 	switch ext {
 	case ".go":
@@ -68,14 +101,22 @@ func updateSyntax(r *row, force bool) bool {
 			}
 		}
 	}
-	return false
+
+	oldState := r.hlState
+	if inComment {
+		r.hlState = 1
+	} else {
+		r.hlState = 0
+	}
+
+	return r.hlState != oldState
 }
 
 func applyTreeSitterHighlight(r *row, n *sitter.Node) {
 	kind := n.Type()
 	start := int(n.StartByte())
 	end := int(n.EndByte())
-	
+
 	var hl uint8 = hlNormal
 	switch kind {
 	case "comment", "line_comment", "block_comment":
@@ -95,21 +136,24 @@ func applyTreeSitterHighlight(r *row, n *sitter.Node) {
 	case "emphasis", "strong_emphasis":
 		hl = hlString
 	}
-	
+
 	if hl != hlNormal {
 		for j := start; j < end && j < len(r.hl); j++ {
 			r.hl[j] = hl
 		}
 	}
-	
+
 	for i := 0; i < int(n.ChildCount()); i++ {
 		applyTreeSitterHighlight(r, n.Child(i))
 	}
 }
 
 func updateAllSyntax(force bool) {
-	for i := range E.rows {
-		updateSyntax(E.rows[i], force)
+	for i := 0; i < len(E.rows); i++ {
+		changed := updateSyntax(E.rows[i], force)
+		if changed && i+1 < len(E.rows) {
+			E.rows[i+1].needsHighlight = true
+		}
 	}
 }
 

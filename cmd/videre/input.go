@@ -7,8 +7,16 @@ import (
 )
 
 func readKey() int {
+	if len(E.keyBuffer) > 0 {
+		c := E.keyBuffer[0]
+		E.keyBuffer = E.keyBuffer[1:]
+		return c
+	}
 	for {
 		ev := E.Screen.PollEvent()
+		if ev == nil {
+			return -1
+		}
 		switch ev := ev.(type) {
 		case *tcell.EventKey:
 			switch ev.Key() {
