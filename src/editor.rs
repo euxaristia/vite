@@ -1001,6 +1001,33 @@ impl Editor {
             self.move_line_end();
         }
     }
+
+    pub fn pos_before(&self, ax: usize, ay: usize, bx: usize, by: usize) -> bool {
+        if ay != by {
+            ay < by
+        } else {
+            ax < bx
+        }
+    }
+
+    pub fn prev_pos(&self, x: usize, y: usize) -> Option<(usize, usize)> {
+        if self.rows.is_empty() || y >= self.rows.len() { return None; }
+        if x > 0 {
+            return Some((utf8_prev_boundary(&self.rows[y].s, x), y));
+        }
+        if y == 0 { return None; }
+        let py = y - 1;
+        Some((self.rows[py].s.len(), py))
+    }
+
+    pub fn next_pos(&self, x: usize, y: usize) -> Option<(usize, usize)> {
+        if self.rows.is_empty() || y >= self.rows.len() { return None; }
+        if x < self.rows[y].s.len() {
+            return Some((utf8_next_boundary(&self.rows[y].s, x), y));
+        }
+        if y >= self.rows.len() - 1 { return None; }
+        Some((0, y + 1))
+    }
 }
 
 fn is_word_char(c: u8) -> bool {

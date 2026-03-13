@@ -336,6 +336,13 @@ fn handle_normal_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
     Ok(false)
 }
 
+fn operator_exclusive_motion(m: char) -> bool {
+    match m {
+        'w' | 'W' | 'b' | 'B' | '0' | '^' | '{' | '}' | 'h' | 'j' | 'k' | 'l' | 'g' | 'G' => true,
+        _ => false,
+    }
+}
+
 fn handle_operator(editor: &mut Editor, op: char, count: usize) -> Result<()> {
     let start_x = editor.cx;
     let start_y = editor.cy;
@@ -347,7 +354,15 @@ fn handle_operator(editor: &mut Editor, op: char, count: usize) -> Result<()> {
                 let ey = (editor.cy + count).saturating_sub(1).min(editor.rows.len().saturating_sub(1));
                 editor.yoink(0, sy, 0, ey, true);
                 if op != 'y' {
-                    editor.delete_range(0, sy, 0, ey);
+                    for _ in 0..=(ey - sy) {
+                        editor.del_row(sy);
+                    }
+                    if editor.rows.is_empty() {
+                        editor.insert_row(0, Vec::new());
+                    }
+                    editor.cy = sy.min(editor.rows.len().saturating_sub(1));
+                    editor.cx = 0;
+                    editor.preferred = 0;
                     if op == 'c' {
                         editor.mode = Mode::Insert;
                         editor.set_status("-- INSERT --".into());
@@ -357,6 +372,7 @@ fn handle_operator(editor: &mut Editor, op: char, count: usize) -> Result<()> {
                 return Ok(());
             }
             
+            // Handle motions
             match m {
                 'w' => { for _ in 0..count { editor.move_word_forward(); } }
                 'b' => { for _ in 0..count { editor.move_word_backward(); } }
@@ -369,14 +385,39 @@ fn handle_operator(editor: &mut Editor, op: char, count: usize) -> Result<()> {
                 _ => { return Ok(()); }
             }
             
-            let dest_x = editor.cx;
-            let dest_y = editor.cy;
+            let mut dest_x = editor.cx;
+            let mut dest_y = editor.cy;
             
             if dest_x == start_x && dest_y == start_y { return Ok(()); }
             
-            editor.yoink(start_x, start_y, dest_x, dest_y, false);
+            let (mut sx, mut sy, mut ex, mut ey);
+            if editor.pos_before(start_x, start_y, dest_x, dest_y) {
+                sx = start_x; sy = start_y;
+                if operator_exclusive_motion(m) {
+                    if let Some((px, py)) = editor.prev_pos(dest_x, dest_y) {
+                        ex = px; ey = py;
+                    } else {
+                        ex = dest_x; ey = dest_y;
+                    }
+                } else {
+                    ex = dest_x; ey = dest_y;
+                }
+            } else {
+                sx = dest_x; sy = dest_y;
+                if operator_exclusive_motion(m) {
+                    if let Some((px, py)) = editor.prev_pos(start_x, start_y) {
+                        ex = px; ey = py;
+                    } else {
+                        ex = start_x; ey = start_y;
+                    }
+                } else {
+                    ex = start_x; ey = start_y;
+                }
+            }
+
+            editor.yoink(sx, sy, ex, ey, false);
             if op != 'y' {
-                editor.delete_range(start_x, start_y, dest_x, dest_y);
+                editor.delete_range(sx, sy, ex, ey);
                 if op == 'c' {
                     editor.mode = Mode::Insert;
                     editor.set_status("-- INSERT --".into());
