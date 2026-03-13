@@ -1456,6 +1456,7 @@ func processKeypress() bool {
 		if r >= 32 && r <= 255 {
 			E.SelectedRegister = r
 			setStatus("\"%c", rune(r))
+			refreshScreen()
 		}
 		return true
 	case 'h':
