@@ -20,7 +20,7 @@ pub fn update_syntax(filename: &str, search_regexp: &Option<Regex>, row_idx: usi
         .and_then(|s| s.to_str())
         .unwrap_or("");
 
-    // Manual C-style comment handling
+    // Manual C-style comment handling (fallback/extra)
     let mut in_comment = if row_idx > 0 { rows[row_idx - 1].hl_state == 1 } else { false };
     if ext == "c" || ext == "h" || ext == "go" || ext == "rs" {
         let mut i = 0;
@@ -69,6 +69,11 @@ pub fn update_syntax(filename: &str, search_regexp: &Option<Regex>, row_idx: usi
             parser.set_language(&language).ok();
             Some(language)
         },
+        "md" => {
+            let language = tree_sitter_md::LANGUAGE.into();
+            parser.set_language(&language).ok();
+            Some(language)
+        },
         _ => None,
     };
 
@@ -103,17 +108,30 @@ fn apply_tree_sitter_highlight(row: &mut Row, node: &Node) {
 
     let hl = match kind {
         "comment" | "line_comment" | "block_comment" => Highlight::Comment,
-        "string_literal" | "char_literal" | "string_content" | "string" => Highlight::String,
-        "integer_literal" | "number_literal" | "integer" | "float_literal" => Highlight::Number,
+        
+        "string_literal" | "char_literal" | "string_content" | "string" | "interpreted_string_literal" | "raw_string_literal" => Highlight::String,
+        
+        "integer_literal" | "number_literal" | "integer" | "float_literal" | "decimal_integer_literal" | "float" => Highlight::Number,
+        
         "fn" | "let" | "mut" | "match" | "if" | "else" | "for" | "while" | "loop" | "return" | 
         "struct" | "enum" | "trait" | "impl" | "use" | "pub" | "mod" | "type" | "where" | "async" | "await" |
         "const" | "static" | "extern" | "crate" | "self" | "super" | "move" | "ref" | "dyn" |
-        "func" | "package" | "import" | "var" | "go" | "defer" | "chan" | "range" | "map" | "interface" |
-        "def" | "class" | "try" | "except" | "finally" | "raise" | "with" | "as" | "yield" | "from" | "global" | "nonlocal" | "assert" | "del" | "pass" | "lambda" => Highlight::Keyword1,
+        "func" | "package" | "import" | "var" | "go" | "defer" | "chan" | "range" | "map" | "interface" | "select" | "case" | "default" | "switch" | "fallthrough" | "type" |
+        "def" | "class" | "try" | "except" | "finally" | "raise" | "with" | "as" | "yield" | "from" | "global" | "nonlocal" | "assert" | "del" | "pass" | "lambda" |
+        "if" | "else" | "elif" | "for" | "while" | "break" | "continue" | "return" | "in" | "is" | "not" | "and" | "or" |
+        "void" | "int" | "char" | "float" | "double" | "struct" | "enum" | "union" | "typedef" | "extern" | "static" | "const" | "volatile" | "inline" | "restrict" |
+        "atx_h1_marker" | "atx_h2_marker" | "atx_h3_marker" | "atx_h4_marker" | "atx_h5_marker" | "atx_h6_marker" | "setext_h1_underline" | "setext_h2_underline" |
+        "fenced_code_block_delimiter" => Highlight::Keyword1,
+        
         "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i64" | "i128" | "f32" | "f64" | 
-        "usize" | "isize" | "bool" | "char" | "str" | "String" | "Vec" | "Option" | "Result" |
+        "usize" | "isize" | "bool" | "char" | "str" | "String" | "Vec" | "Option" | "Result" | "Box" | "Arc" | "Rc" |
         "int" | "float" | "complex" | "list" | "dict" | "set" | "tuple" | "object" | "None" | "True" | "False" |
-        "byte" | "rune" | "uint" | "uintptr" | "float32" | "float64" | "complex64" | "complex128" | "error" => Highlight::Keyword2,
+        "byte" | "rune" | "uint" | "uintptr" | "float32" | "float64" | "complex64" | "complex128" | "error" |
+        "atx_heading" | "list_marker_plus" | "list_marker_minus" | "list_marker_star" | "list_marker_dot" | "list_marker_parenthesis" |
+        "link_text" | "link_label" | "emphasis" | "strong_emphasis" => Highlight::Keyword2,
+        
+        "fenced_code_block" | "code_fence_content" | "indented_code_block" | "inline_code" | "link_destination" | "uri" => Highlight::String,
+        
         _ => Highlight::Normal,
     };
 
