@@ -1449,9 +1449,6 @@ func processKeypress() bool {
 		for i := 0; i < count; i++ {
 			findNext(-1)
 		}
-	case '_':
-		E.SelectedRegister = '_'
-		return true
 	case '"':
 		r := readKey()
 		if r >= 32 && r <= 255 {
