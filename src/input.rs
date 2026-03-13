@@ -177,16 +177,41 @@ fn handle_normal_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
                 if parts.is_empty() { return Ok(false); }
                 match parts[0] {
                     "q" => {
-                        if editor.dirty { editor.set_status("No write since last change".into()); }
+                        if editor.dirty { editor.set_status("No write since last change (add ! to override)".into()); }
                         else { return Ok(true); }
                     }
-                    "q!" => return Ok(true),
+                    "q!" | "qa!" => return Ok(true),
+                    "qa" => {
+                        if editor.dirty { editor.set_status("No write since last change (add ! to override)".into()); }
+                        else { return Ok(true); }
+                    }
                     "w" => { let _ = editor.save_file(); }
-                    "wq" => {
+                    "wq" | "x" => {
                         let _ = editor.save_file();
                         return Ok(true);
                     }
-                    _ => editor.set_status(format!("Unknown command: {}", parts[0])),
+                    "e" => {
+                        if parts.len() > 1 {
+                            if editor.dirty {
+                                editor.set_status("No write since last change (add ! to override)".into());
+                            } else {
+                                let _ = editor.open_file(parts[1]);
+                                editor.move_file_start();
+                            }
+                        }
+                    }
+                    "h" | "help" => {
+                        editor.set_status("Help not implemented yet".into());
+                    }
+                    _ => {
+                        if let Ok(n) = parts[0].parse::<usize>() {
+                            let target = n.saturating_sub(1);
+                            editor.cy = target.min(editor.rows.len().saturating_sub(1));
+                            editor.move_line_start();
+                        } else {
+                            editor.set_status(format!("Not an editor command: {}", parts[0]));
+                        }
+                    }
                 }
             }
         }
