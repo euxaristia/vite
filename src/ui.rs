@@ -224,7 +224,7 @@ fn draw_status_bar(editor: &Editor, stdout: &mut impl Write) -> Result<()> {
     queue!(
         stdout,
         SetBackgroundColor(Color::Grey),
-        SetForegroundColor(Color::DarkBlue)
+        SetForegroundColor(Color::Black)
     )?;
 
     let left_len = std::cmp::min(left.len(), editor.screen_cols.saturating_sub(right.len()));
