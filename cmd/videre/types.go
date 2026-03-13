@@ -130,6 +130,8 @@ type editor struct {
 	currentChange     []int
 	keyBuffer         []int
 	LSP               *lspClient
+	SelectedRegister  int
+	InTest            bool
 }
 
 var E editor

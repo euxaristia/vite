@@ -12,6 +12,9 @@ func readKey() int {
 		E.keyBuffer = E.keyBuffer[1:]
 		return c
 	}
+	if E.InTest {
+		return -1
+	}
 	for {
 		ev := E.Screen.PollEvent()
 		if ev == nil {

@@ -16,6 +16,7 @@ func seedEditor(lines []string, cx, cy int) {
 		mode:   modeNormal,
 		selSX:  -1,
 		selSY:  -1,
+		InTest: true,
 	}
 	E.rows = make([]*row, len(lines))
 	for i, ln := range lines {

@@ -225,6 +225,9 @@ func setClipboard(text []byte) {
 	if len(text) == 0 {
 		return
 	}
+	if E.InTest {
+		return
+	}
 	encoded := base64.StdEncoding.EncodeToString(text)
 	fmt.Printf("\x1b]52;c;%s\x07", encoded)
 	_ = os.Stdout.Sync()
@@ -240,6 +243,9 @@ func setClipboard(text []byte) {
 }
 
 func getClipboard() []byte {
+	if E.InTest {
+		return nil
+	}
 	if out, err := exec.Command("wl-paste", "-n").Output(); err == nil && len(out) > 0 {
 		return out
 	}
@@ -292,8 +298,20 @@ func yoink(sx, sy, ex, ey int, isLine bool) {
 			}
 		}
 	}
-	E.registers['"'] = reg{s: b.Bytes(), isLine: isLine}
-	setClipboard(E.registers['"'].s)
+
+	regName := E.SelectedRegister
+	if regName == 0 {
+		regName = '"'
+	}
+
+	if regName == '_' {
+		return
+	}
+
+	E.registers[regName] = reg{s: b.Bytes(), isLine: isLine}
+	if regName == '"' {
+		setClipboard(E.registers['"'].s)
+	}
 }
 
 func deleteRange(sx, sy, ex, ey int) {
@@ -972,20 +990,20 @@ func handleOperator(op int, count int) bool {
 				startRecording(op)
 				E.currentChange = append(E.currentChange, m, obj)
 			}
-			if op == 'y' {
-				yoink(sx, sy, ex, ey, false)
-				return true
-			}
 			yoink(sx, sy, ex, ey, false)
-			deleteRange(sx, sy, ex, ey)
-			if op == 'c' {
-				E.mode = modeInsert
-				setStatus("-- INSERT --")
-			} else {
-				stopRecording()
+			if op != 'y' {
+				deleteRange(sx, sy, ex, ey)
+				if op == 'c' {
+					E.mode = modeInsert
+					setStatus("-- INSERT --")
+				} else {
+					stopRecording()
+				}
 			}
+			E.SelectedRegister = '"'
 			return true
 		}
+		E.SelectedRegister = '"'
 		return true
 	}
 
@@ -1014,6 +1032,7 @@ func handleOperator(op int, count int) bool {
 		} else if op != 'y' {
 			stopRecording()
 		}
+		E.SelectedRegister = '"'
 		return true
 	}
 
@@ -1084,26 +1103,19 @@ func handleOperator(op int, count int) bool {
 		}
 	}
 
-	if op != 'y' {
-		startRecording(op)
-		// This is tricky because the motion might have read multiple keys
-		// For now we only support simple motions for repeat
-		E.currentChange = append(E.currentChange, usedMotion)
-	}
-
-	if op == 'y' {
-		yoink(sx, sy, ex, ey, false)
-		E.cx, E.cy, E.preferred = startX, startY, startX
-		return true
-	}
 	yoink(sx, sy, ex, ey, false)
-	deleteRange(sx, sy, ex, ey)
-	if op == 'c' {
-		E.mode = modeInsert
-		setStatus("-- INSERT --")
+	if op != 'y' {
+		deleteRange(sx, sy, ex, ey)
+		if op == 'c' {
+			E.mode = modeInsert
+			setStatus("-- INSERT --")
+		} else {
+			stopRecording()
+		}
 	} else {
-		stopRecording()
+		E.cx, E.cy, E.preferred = startX, startY, startX
 	}
+	E.SelectedRegister = '"'
 	return true
 }
 
@@ -1346,10 +1358,12 @@ func processKeypress() bool {
 			E.selSX, E.selSY = -1, -1
 			stopRecording()
 		}
+		E.SelectedRegister = '"'
 	case 'p':
 		for i := 0; i < count; i++ {
 			paste()
 		}
+		E.SelectedRegister = '"'
 	case ctrlShiftC:
 		if E.mode == modeVisual || E.mode == modeVisualLine {
 			yoink(E.selSX, E.selSY, E.cx, E.cy, E.mode == modeVisualLine)
@@ -1435,6 +1449,15 @@ func processKeypress() bool {
 		for i := 0; i < count; i++ {
 			findNext(-1)
 		}
+	case '_':
+		E.SelectedRegister = '_'
+		return true
+	case '"':
+		r := readKey()
+		if r >= 32 && r <= 255 {
+			E.SelectedRegister = r
+		}
+		return true
 	case 'h':
 		_ = applyMotionKey('h', count)
 	case 'j':

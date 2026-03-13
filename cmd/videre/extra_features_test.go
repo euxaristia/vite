@@ -193,3 +193,28 @@ func TestShiftArrowMotions(t *testing.T) {
 		t.Errorf("Shift+Down expected cy=2, got %d", E.cy)
 	}
 }
+
+func TestBlackHoleDelete(t *testing.T) {
+	seedEditor([]string{"line1", "line2", "line3"}, 0, 0)
+	
+	// First, copy "line1" to the unnamed register
+	yoink(0, 0, 5, 0, true)
+	if string(E.registers['"'].s) != "line1\n" {
+		t.Errorf("Initial yoink failed, got %q", string(E.registers['"'].s))
+	}
+	
+	// Now perform a black hole delete on "line1"
+	E.SelectedRegister = '_'
+	E.keyBuffer = []int{'d'} // pre-load 'd' so readKey() inside handleOperator doesn't block
+	handleOperator('d', 1)   // simulates dd
+	
+	// Check that line1 is gone from rows
+	if string(E.rows[0].s) != "line2" {
+		t.Errorf("Delete failed, row 0 is %q", string(E.rows[0].s))
+	}
+	
+	// Check that the unnamed register still contains "line1"
+	if string(E.registers['"'].s) != "line1\n" {
+		t.Errorf("Unnamed register was overwritten by black hole delete, got %q", string(E.registers['"'].s))
+	}
+}
