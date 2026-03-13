@@ -7,24 +7,24 @@ use crossterm::{
 use std::io::{stdout, Result, Write};
 
 use crate::types::{Highlight, Mode};
-use crate::editor::{Editor, utf8_snap_boundary};
+use crate::editor::{Editor, utf8_snap_boundary, display_width_bytes, rune_display_width};
 use crate::syntax;
 
 pub fn enable_raw_mode() -> Result<()> {
     terminal::enable_raw_mode()
 }
 
-fn highlight_to_color(hl: Highlight) -> Color {
+fn highlight_to_color(hl: Highlight) -> (Color, Color) {
     match hl {
-        Highlight::Normal => Color::White,
-        Highlight::Comment => Color::Green,
-        Highlight::Keyword1 => Color::Yellow,
-        Highlight::Keyword2 => Color::Cyan,
-        Highlight::String => Color::Magenta,
-        Highlight::Number => Color::Red,
-        Highlight::Match => Color::Blue,
-        Highlight::MatchCursor => Color::Yellow,
-        Highlight::Visual => Color::Grey,
+        Highlight::Normal => (Color::White, Color::Reset),
+        Highlight::Comment => (Color::Green, Color::Reset),
+        Highlight::Keyword1 => (Color::Yellow, Color::Reset),
+        Highlight::Keyword2 => (Color::Cyan, Color::Reset),
+        Highlight::String => (Color::Magenta, Color::Reset),
+        Highlight::Number => (Color::Red, Color::Reset),
+        Highlight::Match => (Color::White, Color::DarkBlue),
+        Highlight::MatchCursor => (Color::Black, Color::Yellow),
+        Highlight::Visual => (Color::White, Color::DarkGrey),
     }
 }
 
@@ -51,10 +51,24 @@ pub fn refresh_screen(editor: &mut Editor) -> Result<()> {
     let g = editor.gutter_width();
     let gcols = if g > 0 { g + 1 } else { 0 };
     
-    let cx = (editor.cx.saturating_sub(editor.coloff) + gcols) as u16; 
-    let cy = editor.cy.saturating_sub(editor.rowoff) as u16;
+    let mut cur_y = (editor.cy.saturating_sub(editor.rowoff)) as u16;
+    let mut cur_x = gcols as u16;
 
-    queue!(stdout, cursor::MoveTo(cx, cy), cursor::Show)?;
+    if editor.cy < editor.rows.len() {
+        let row = &editor.rows[editor.cy].s;
+        let start = utf8_snap_boundary(row, editor.coloff);
+        let end = editor.cx.min(row.len());
+        if end > start {
+            cur_x += display_width_bytes(&row[start..end], gcols) as u16;
+        }
+    }
+
+    if !editor.statusmsg.is_empty() && editor.statusmsg.starts_with(':') {
+        cur_y = (editor.screen_rows + 1) as u16;
+        cur_x = editor.statusmsg.len() as u16;
+    }
+
+    queue!(stdout, cursor::MoveTo(cur_x, cur_y), cursor::Show)?;
     stdout.flush()?;
     Ok(())
 }
@@ -105,7 +119,6 @@ fn draw_rows(editor: &mut Editor, stdout: &mut impl Write) -> Result<()> {
                 queue!(stdout, SetForegroundColor(Color::DarkGrey), Print("~"), SetForegroundColor(Color::Reset))?;
             }
         } else {
-            // Draw gutter
             if g > 0 {
                 let line_num = (filerow + 1).to_string();
                 let padding = g.saturating_sub(line_num.len());
@@ -119,37 +132,59 @@ fn draw_rows(editor: &mut Editor, stdout: &mut impl Write) -> Result<()> {
 
             let row = &editor.rows[filerow];
             let start = utf8_snap_boundary(&row.s, editor.coloff);
-            let len = row.s.len().saturating_sub(start);
-            let display_len = if len > text_cols { text_cols } else { len };
-
             let row_in_selection = has_selection && filerow >= sy && filerow <= ey;
 
-            if start < row.s.len() {
-                let end = start + display_len;
-                let visible_s = &row.s[start..end];
-                let visible_hl = &row.hl[start..end];
-                
-                for (i, (&ch, &hl)) in visible_s.iter().zip(visible_hl.iter()).enumerate() {
-                    let mut style_bg = Color::Reset;
-                    if row_in_selection {
-                        let x = i + start;
-                        let sel = if line_selection { true }
-                                else if sy == ey { x >= sx && x <= ex }
-                                else if filerow == sy { x >= sx }
-                                else if filerow == ey { x <= ex }
-                                else { true };
-                        if sel { style_bg = Color::DarkGrey; }
-                    }
+            let mut col = 0;
+            let mut i = start;
+            while i < row.s.len() && col < text_cols {
+                let (r, n) = crate::editor::decode_utf8_rune(&row.s[i..]);
+                if n == 0 { break; }
 
-                    queue!(stdout, SetForegroundColor(highlight_to_color(hl)), SetBackgroundColor(style_bg))?;
-                    if ch == b'\t' {
-                        queue!(stdout, Print(" "))?;
-                    } else {
-                        queue!(stdout, Print(ch as char))?;
+                let mut hl = row.hl[i];
+                // Check if current search match is under cursor
+                if hl == Highlight::Match {
+                    if let Some(re) = &editor.search_regexp {
+                        if let Some(m) = re.find(&row.s) {
+                            if filerow == editor.cy && i >= m.start() && i < m.end() && editor.cx >= m.start() && editor.cx < m.end() {
+                                hl = Highlight::MatchCursor;
+                            }
+                        }
                     }
                 }
-                queue!(stdout, SetForegroundColor(Color::Reset), SetBackgroundColor(Color::Reset))?;
+
+                let (fg, mut bg) = highlight_to_color(hl);
+
+                if row_in_selection {
+                    let x = i;
+                    let sel = if line_selection { true }
+                            else if sy == ey { x >= sx && x <= ex }
+                            else if filerow == sy { x >= sx }
+                            else if filerow == ey { x <= ex }
+                            else { true };
+                    if sel { bg = Color::DarkGrey; }
+                }
+
+                queue!(stdout, SetForegroundColor(fg), SetBackgroundColor(bg))?;
+                if r == '\t' {
+                    let tab_w = 8 - ((gcols + col) % 8);
+                    for _ in 0..tab_w {
+                        if col < text_cols {
+                            queue!(stdout, Print(" "))?;
+                            col += 1;
+                        }
+                    }
+                } else {
+                    let w = rune_display_width(r);
+                    if col + w <= text_cols {
+                        queue!(stdout, Print(r))?;
+                        col += w;
+                    } else {
+                        break;
+                    }
+                }
+                i += n;
             }
+            queue!(stdout, SetForegroundColor(Color::Reset), SetBackgroundColor(Color::Reset))?;
         }
         
         queue!(stdout, Clear(ClearType::UntilNewLine))?;
@@ -188,8 +223,8 @@ fn draw_status_bar(editor: &Editor, stdout: &mut impl Write) -> Result<()> {
 
     queue!(
         stdout,
-        SetBackgroundColor(Color::White),
-        SetForegroundColor(Color::Black)
+        SetBackgroundColor(Color::Grey),
+        SetForegroundColor(Color::DarkBlue)
     )?;
 
     let left_len = std::cmp::min(left.len(), editor.screen_cols.saturating_sub(right.len()));

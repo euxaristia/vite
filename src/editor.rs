@@ -574,6 +574,128 @@ impl Editor {
         self.cx = ex;
     }
 
+    pub fn find_text_object(&self, obj: char, inner: bool) -> Option<(usize, usize, usize, usize)> {
+        if self.rows.is_empty() || self.cy >= self.rows.len() { return None; }
+        let line = &self.rows[self.cy].s;
+        
+        match obj {
+            'w' | 'W' => {
+                if line.is_empty() { return None; }
+                let big = obj == 'W';
+                let mut sx = self.cx;
+                let mut ex = self.cx;
+                
+                // Find start of word
+                while sx > 0 {
+                    let prev = line[sx - 1];
+                    let is_word = if big { prev != b' ' && prev != b'\t' } else { is_word_char(prev) };
+                    if !is_word { break; }
+                    sx -= 1;
+                }
+                // Find end of word
+                while ex < line.len().saturating_sub(1) {
+                    let next = line[ex + 1];
+                    let is_word = if big { next != b' ' && next != b'\t' } else { is_word_char(next) };
+                    if !is_word { break; }
+                    ex += 1;
+                }
+                
+                if !inner {
+                    // Include trailing whitespace
+                    while ex < line.len().saturating_sub(1) && (line[ex+1] == b' ' || line[ex+1] == b'\t') {
+                        ex += 1;
+                    }
+                }
+                Some((sx, self.cy, ex, self.cy))
+            },
+            '"' | '\'' | '`' => {
+                let delim = obj as u8;
+                let mut sx = None;
+                let mut ex = None;
+                
+                // Search backwards
+                for x in (0..=self.cx).rev() {
+                    if line[x] == delim { sx = Some(x); break; }
+                }
+                // Search forwards
+                for x in self.cx..line.len() {
+                    if line[x] == delim { ex = Some(x); break; }
+                }
+                
+                if let (Some(mut s), Some(mut e)) = (sx, ex) {
+                    if s == e { return None; }
+                    if inner { s += 1; e = e.saturating_sub(1); }
+                    if s > e { return None; }
+                    Some((s, self.cy, e, self.cy))
+                } else {
+                    None
+                }
+            },
+            '(' | ')' | 'b' | '[' | ']' | '{' | '}' | 'B' | '<' | '>' => {
+                let (open, close) = match obj {
+                    '(' | ')' | 'b' => (b'(', b')'),
+                    '[' | ']' => (b'[', b']'),
+                    '{' | '}' | 'B' => (b'{', b'}'),
+                    '<' | '>' => (b'<', b'>'),
+                    _ => unreachable!(),
+                };
+                
+                let mut found_open = None;
+                let mut depth = 0;
+                let mut sy = self.cy;
+                let mut sx = self.cx;
+                
+                // Search backwards for open
+                'outer_open: loop {
+                    let row = &self.rows[sy].s;
+                    let start = if sy == self.cy { sx } else { row.len().saturating_sub(1) };
+                    for x in (0..=start).rev() {
+                        if row[x] == close { depth += 1; }
+                        else if row[x] == open {
+                            if depth == 0 { found_open = Some((x, sy)); break 'outer_open; }
+                            depth -= 1;
+                        }
+                    }
+                    if sy == 0 { break; }
+                    sy -= 1;
+                }
+                
+                if let Some((osx, osy)) = found_open {
+                    let mut found_close = None;
+                    depth = 0;
+                    let mut ey = self.cy;
+                    let mut ex = self.cx;
+                    
+                    // Search forwards for close
+                    'outer_close: loop {
+                        let row = &self.rows[ey].s;
+                        let start = if ey == self.cy { ex } else { 0 };
+                        for x in start..row.len() {
+                            if row[x] == open { depth += 1; }
+                            else if row[x] == close {
+                                if depth == 0 { found_close = Some((x, ey)); break 'outer_close; }
+                                depth -= 1;
+                            }
+                        }
+                        if ey >= self.rows.len() - 1 { break; }
+                        ey += 1;
+                    }
+                    
+                    if let Some((ocx, oey)) = found_close {
+                        let (mut fsx, mut fsy, mut fex, mut fey) = (osx, osy, ocx, oey);
+                        if inner {
+                            if let Some((nx, ny)) = self.next_pos(fsx, fsy) { fsx = nx; fsy = ny; }
+                            if let Some((px, py)) = self.prev_pos(fex, fey) { fex = px; fey = py; }
+                        }
+                        return Some((fsx, fsy, fex, fey));
+                    }
+                }
+                None
+            },
+            _ => None,
+        }
+    }
+
     pub fn find_char(&mut self, c: u8, direction: i32, till: bool) -> bool {
         if self.rows.is_empty() || self.cy >= self.rows.len() { return false; }
         self.last_search_char = Some(c);
@@ -908,7 +1030,7 @@ impl Editor {
         }
     }
 
-    pub fn move_word_forward(&mut self) {
+    pub fn move_word_forward(&mut self, big: bool) {
         if self.rows.is_empty() { return; }
         let mut r = self.cy;
         let mut c = self.cx;
@@ -916,10 +1038,14 @@ impl Editor {
         while r < self.rows.len() {
             let line = &self.rows[r].s;
             if c < line.len() {
-                if is_word_char(line[c]) {
-                    while c < line.len() && is_word_char(line[c]) { c += 1; }
+                if big {
+                    while c < line.len() && line[c] != b' ' && line[c] != b'\t' { c += 1; }
                 } else {
-                    while c < line.len() && !is_word_char(line[c]) && line[c] != b' ' && line[c] != b'\t' { c += 1; }
+                    if is_word_char(line[c]) {
+                        while c < line.len() && is_word_char(line[c]) { c += 1; }
+                    } else {
+                        while c < line.len() && !is_word_char(line[c]) && line[c] != b' ' && line[c] != b'\t' { c += 1; }
+                    }
                 }
             }
             while c < line.len() && (line[c] == b' ' || line[c] == b'\t') { c += 1; }
@@ -932,9 +1058,12 @@ impl Editor {
             r += 1;
             c = 0;
         }
+        self.cy = self.rows.len() - 1;
+        self.cx = self.rows[self.cy].s.len();
+        self.preferred = self.cx;
     }
 
-    pub fn move_word_backward(&mut self) {
+    pub fn move_word_backward(&mut self, big: bool) {
         if self.rows.is_empty() { return; }
         if self.cx == 0 && self.cy == 0 { return; }
         
@@ -948,10 +1077,14 @@ impl Editor {
                 c -= 1;
             }
             if c < line.len() && (line[c] != b' ' && line[c] != b'\t') {
-                if is_word_char(line[c]) {
-                    while c > 0 && is_word_char(line[c-1]) { c -= 1; }
+                if big {
+                    while c > 0 && line[c-1] != b' ' && line[c-1] != b'\t' { c -= 1; }
                 } else {
-                    while c > 0 && !is_word_char(line[c-1]) && line[c-1] != b' ' && line[c-1] != b'\t' { c -= 1; }
+                    if is_word_char(line[c]) {
+                        while c > 0 && is_word_char(line[c-1]) { c -= 1; }
+                    } else {
+                        while c > 0 && !is_word_char(line[c-1]) && line[c-1] != b' ' && line[c-1] != b'\t' { c -= 1; }
+                    }
                 }
                 self.cy = r;
                 self.cx = c;
@@ -961,6 +1094,34 @@ impl Editor {
             if r == 0 { break; }
             r -= 1;
             c = self.rows[r].s.len().saturating_sub(1);
+        }
+        self.cy = 0; self.cx = 0; self.preferred = 0;
+    }
+
+    pub fn move_word_end(&mut self, big: bool) {
+        if self.rows.is_empty() { return; }
+        let mut r = self.cy;
+        let mut c = self.cx + 1;
+        while r < self.rows.len() {
+            let line = &self.rows[r].s;
+            while c < line.len() && (line[c] == b' ' || line[c] == b'\t') { c += 1; }
+            if c < line.len() {
+                if big {
+                    while c < line.len().saturating_sub(1) && line[c+1] != b' ' && line[c+1] != b'\t' { c += 1; }
+                } else {
+                    if is_word_char(line[c]) {
+                        while c < line.len().saturating_sub(1) && is_word_char(line[c+1]) { c += 1; }
+                    } else {
+                        while c < line.len().saturating_sub(1) && !is_word_char(line[c+1]) && line[c+1] != b' ' && line[c+1] != b'\t' { c += 1; }
+                    }
+                }
+                self.cy = r;
+                self.cx = c;
+                self.preferred = c;
+                return;
+            }
+            r += 1;
+            c = 0;
         }
     }
 
@@ -1034,8 +1195,41 @@ fn is_word_char(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_'
 }
 
+pub fn rune_display_width(r: char) -> usize {
+    let cp = r as u32;
+    if cp < 0x20 || (cp >= 0x7F && cp < 0xA0) { return 0; }
+    if (cp >= 0x0300 && cp <= 0x036F) || (cp >= 0x1AB0 && cp <= 0x1AFF) ||
+       (cp >= 0x1DC0 && cp <= 0x1DFF) || (cp >= 0x20D0 && cp <= 0x20FF) ||
+       (cp >= 0xFE20 && cp <= 0xFE2F) || cp == 0x200D ||
+       (cp >= 0xFE00 && cp <= 0xFE0F) { return 0; }
+    if (cp >= 0x1100 && cp <= 0x115F) || (cp >= 0x2329 && cp <= 0x232A) ||
+       (cp >= 0x2E80 && cp <= 0xA4CF) || (cp >= 0xAC00 && cp <= 0xD7A3) ||
+       (cp >= 0xF900 && cp <= 0xFAFF) || (cp >= 0xFE10 && cp <= 0xFE19) ||
+       (cp >= 0xFE30 && cp <= 0xFE6F) || (cp >= 0xFF00 && cp <= 0xFF60) ||
+       (cp >= 0xFFE0 && cp <= 0xFFE6) { return 2; }
+    if (cp >= 0x1F300 && cp <= 0x1F64F) || (cp >= 0x1F680 && cp <= 0x1F6FF) ||
+       (cp >= 0x1F900 && cp <= 0x1F9FF) || (cp >= 0x2600 && cp <= 0x27BF) { return 2; }
+    1
+}
+
+pub fn display_width_bytes(s: &[u8], mut col: usize) -> usize {
+    let start = col;
+    let mut i = 0;
+    while i < s.len() {
+        let (r, n) = decode_utf8_rune(&s[i..]);
+        if n == 0 { break; }
+        if r == '\t' {
+            col += 8 - (col % 8);
+        } else {
+            col += rune_display_width(r);
+        }
+        i += n;
+    }
+    col - start
+}
+
 // UTF-8 Helpers
-fn decode_utf8_rune(s: &[u8]) -> (char, usize) {
+pub fn decode_utf8_rune(s: &[u8]) -> (char, usize) {
     if s.is_empty() { return ('\0', 0); }
     let first = s[0];
     if first & 0x80 == 0 { return (first as char, 1); }

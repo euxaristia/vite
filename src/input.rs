@@ -36,6 +36,11 @@ where F: FnMut(&mut Editor, &str, KeyCode) {
                         callback(editor, &buf, key_event.code);
                     }
                     KeyCode::Backspace => {
+                        if buf.is_empty() {
+                            editor.set_status(String::new());
+                            callback(editor, &buf, KeyCode::Backspace);
+                            return Ok(None);
+                        }
                         buf.pop();
                         callback(editor, &buf, key_event.code);
                     }
@@ -148,25 +153,40 @@ fn handle_normal_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
             editor.save_undo();
         }
         KeyCode::Char('v') => {
-            editor.mode = Mode::Visual;
-            editor.sel_sx = editor.cx;
-            editor.sel_sy = editor.cy;
+            if editor.mode == Mode::Visual {
+                editor.mode = Mode::Normal;
+                editor.set_status(String::new());
+            } else {
+                editor.mode = Mode::Visual;
+                editor.sel_sx = editor.cx;
+                editor.sel_sy = editor.cy;
+            }
         }
         KeyCode::Char('V') => {
-            editor.mode = Mode::VisualLine;
-            editor.sel_sx = 0;
-            editor.sel_sy = editor.cy;
+            if editor.mode == Mode::VisualLine {
+                editor.mode = Mode::Normal;
+                editor.set_status(String::new());
+            } else {
+                editor.mode = Mode::VisualLine;
+                editor.sel_sx = 0;
+                editor.sel_sy = editor.cy;
+            }
         }
         KeyCode::Char('h') | KeyCode::Left => { for _ in 0..count { editor.move_cursor(KeyCode::Left); } }
         KeyCode::Char('j') | KeyCode::Down => { for _ in 0..count { editor.move_cursor(KeyCode::Down); } }
         KeyCode::Char('k') | KeyCode::Up => { for _ in 0..count { editor.move_cursor(KeyCode::Up); } }
         KeyCode::Char('l') | KeyCode::Right => { for _ in 0..count { editor.move_cursor(KeyCode::Right); } }
-        KeyCode::Char('w') => { for _ in 0..count { editor.move_word_forward(); } }
-        KeyCode::Char('b') => { for _ in 0..count { editor.move_word_backward(); } }
+        KeyCode::Char('w') => { for _ in 0..count { editor.move_word_forward(false); } }
+        KeyCode::Char('W') => { for _ in 0..count { editor.move_word_forward(true); } }
+        KeyCode::Char('b') => { for _ in 0..count { editor.move_word_backward(false); } }
+        KeyCode::Char('B') => { for _ in 0..count { editor.move_word_backward(true); } }
+        KeyCode::Char('e') => { for _ in 0..count { editor.move_word_end(false); } }
+        KeyCode::Char('E') => { for _ in 0..count { editor.move_word_end(true); } }
         KeyCode::Char('{') => { for _ in 0..count { editor.move_prev_paragraph(); } }
         KeyCode::Char('}') => { for _ in 0..count { editor.move_next_paragraph(); } }
         KeyCode::Char('%') => editor.match_bracket(),
         KeyCode::Char('0') => editor.move_line_start(),
+        KeyCode::Char('^') => editor.move_first_non_whitespace(),
         KeyCode::Char('$') => editor.move_line_end(),
         KeyCode::Char('G') => {
             if editor.count_prefix > 0 {
@@ -226,7 +246,7 @@ fn handle_normal_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
             editor.yoink(sx, sy, ex, sy, false);
             editor.delete_range(sx, sy, ex, sy);
         }
-        KeyCode::Char('y') | KeyCode::Char('d') | KeyCode::Char('c') => {
+        KeyCode::Char('y') | KeyCode::Char('d') | KeyCode::Char('c') | KeyCode::Char('>') | KeyCode::Char('<') => {
             if let KeyCode::Char(op) = key.code {
                 handle_operator(editor, op, count)?;
             }
@@ -237,7 +257,7 @@ fn handle_normal_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
             let saved_pref = editor.preferred; let saved_col = editor.coloff; let saved_row = editor.rowoff;
             
             let res = prompt(editor, "/", |ed, query, key| {
-                if key == KeyCode::Esc {
+                if key == KeyCode::Esc || key == KeyCode::Backspace && query.is_empty() {
                     ed.set_search_pattern(String::new());
                 } else if key == KeyCode::Enter {
                     // keep current position
@@ -330,6 +350,20 @@ fn handle_normal_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
                 }
             }
         }
+        KeyCode::Char('Z') => {
+            if let Event::Key(next_key) = event::read()? {
+                match next_key.code {
+                    KeyCode::Char('Z') => {
+                        let _ = editor.save_file();
+                        return Ok(true);
+                    }
+                    KeyCode::Char('Q') => {
+                        return Ok(true);
+                    }
+                    _ => {}
+                }
+            }
+        }
         _ => {}
     }
     editor.count_prefix = 0;
@@ -352,6 +386,27 @@ fn handle_operator(editor: &mut Editor, op: char, count: usize) -> Result<()> {
             if m == op {
                 let sy = editor.cy;
                 let ey = (editor.cy + count).saturating_sub(1).min(editor.rows.len().saturating_sub(1));
+                
+                if op == '>' || op == '<' {
+                    editor.save_undo();
+                    for y in sy..=ey {
+                        editor.rows[y] = editor.rows[y].duplicate();
+                        if op == '>' {
+                            editor.rows[y].s.insert(0, b' '); editor.rows[y].s.insert(0, b' ');
+                            editor.rows[y].s.insert(0, b' '); editor.rows[y].s.insert(0, b' ');
+                        } else {
+                            let mut trim = 0;
+                            while trim < 4 && trim < editor.rows[y].s.len() && editor.rows[y].s[trim] == b' ' {
+                                trim += 1;
+                            }
+                            if trim > 0 { editor.rows[y].s.drain(0..trim); }
+                        }
+                        editor.rows[y].needs_highlight = true;
+                    }
+                    editor.dirty = true;
+                    return Ok(());
+                }
+
                 editor.yoink(0, sy, 0, ey, true);
                 if op != 'y' {
                     for _ in 0..=(ey - sy) {
@@ -372,25 +427,54 @@ fn handle_operator(editor: &mut Editor, op: char, count: usize) -> Result<()> {
                 return Ok(());
             }
             
+            if m == 'i' || m == 'a' {
+                if let Event::Key(obj_key) = event::read()? {
+                    if let KeyCode::Char(obj) = obj_key.code {
+                        if let Some((sx, sy, ex, ey)) = editor.find_text_object(obj, m == 'i') {
+                            editor.yoink(sx, sy, ex, ey, false);
+                            if op != 'y' {
+                                editor.delete_range(sx, sy, ex, ey);
+                                if op == 'c' {
+                                    editor.mode = Mode::Insert;
+                                    editor.set_status("-- INSERT --".into());
+                                }
+                            } else {
+                                editor.cx = start_x; editor.cy = start_y;
+                            }
+                            editor.selected_register = '"' as usize;
+                            return Ok(());
+                        }
+                    }
+                }
+                return Ok(());
+            }
+
             // Handle motions
             match m {
-                'w' => { for _ in 0..count { editor.move_word_forward(); } }
-                'b' => { for _ in 0..count { editor.move_word_backward(); } }
+                'w' => { for _ in 0..count { editor.move_word_forward(false); } }
+                'W' => { for _ in 0..count { editor.move_word_forward(true); } }
+                'b' => { for _ in 0..count { editor.move_word_backward(false); } }
+                'B' => { for _ in 0..count { editor.move_word_backward(true); } }
+                'e' => { for _ in 0..count { editor.move_word_end(false); } }
+                'E' => { for _ in 0..count { editor.move_word_end(true); } }
                 'h' => { for _ in 0..count { editor.move_cursor(KeyCode::Left); } }
                 'j' => { for _ in 0..count { editor.move_cursor(KeyCode::Down); } }
                 'k' => { for _ in 0..count { editor.move_cursor(KeyCode::Up); } }
                 'l' => { for _ in 0..count { editor.move_cursor(KeyCode::Right); } }
+                '{' => { for _ in 0..count { editor.move_prev_paragraph(); } }
+                '}' => { for _ in 0..count { editor.move_next_paragraph(); } }
                 '$' => editor.move_line_end(),
                 '0' => editor.move_line_start(),
+                '^' => editor.move_first_non_whitespace(),
                 _ => { return Ok(()); }
             }
             
-            let mut dest_x = editor.cx;
-            let mut dest_y = editor.cy;
+            let dest_x = editor.cx;
+            let dest_y = editor.cy;
             
             if dest_x == start_x && dest_y == start_y { return Ok(()); }
             
-            let (mut sx, mut sy, mut ex, mut ey);
+            let (sx, sy, ex, ey);
             if editor.pos_before(start_x, start_y, dest_x, dest_y) {
                 sx = start_x; sy = start_y;
                 if operator_exclusive_motion(m) {
@@ -413,6 +497,27 @@ fn handle_operator(editor: &mut Editor, op: char, count: usize) -> Result<()> {
                 } else {
                     ex = start_x; ey = start_y;
                 }
+            }
+
+            if op == '>' || op == '<' {
+                editor.save_undo();
+                for y in sy..=ey {
+                    editor.rows[y] = editor.rows[y].duplicate();
+                    if op == '>' {
+                        editor.rows[y].s.insert(0, b' '); editor.rows[y].s.insert(0, b' ');
+                        editor.rows[y].s.insert(0, b' '); editor.rows[y].s.insert(0, b' ');
+                    } else {
+                        let mut trim = 0;
+                        while trim < 4 && trim < editor.rows[y].s.len() && editor.rows[y].s[trim] == b' ' {
+                            trim += 1;
+                        }
+                        if trim > 0 { editor.rows[y].s.drain(0..trim); }
+                    }
+                    editor.rows[y].needs_highlight = true;
+                }
+                editor.dirty = true;
+                editor.cx = start_x; editor.cy = start_y;
+                return Ok(());
             }
 
             editor.yoink(sx, sy, ex, ey, false);
@@ -439,10 +544,33 @@ fn handle_visual_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
             editor.mode = Mode::Normal;
             editor.set_status(String::new());
         }
+        KeyCode::Char('i') | KeyCode::Char('a') => {
+            if let Event::Key(obj_key) = event::read()? {
+                if let KeyCode::Char(obj) = obj_key.code {
+                    if let Some((sx, sy, ex, ey)) = editor.find_text_object(obj, key.code == KeyCode::Char('i')) {
+                        editor.sel_sx = sx; editor.sel_sy = sy;
+                        editor.cx = ex; editor.cy = ey;
+                        editor.preferred = ex;
+                        editor.mode = Mode::Visual;
+                    }
+                }
+            }
+        }
         KeyCode::Char('h') | KeyCode::Left => editor.move_cursor(KeyCode::Left),
         KeyCode::Char('j') | KeyCode::Down => editor.move_cursor(KeyCode::Down),
         KeyCode::Char('k') | KeyCode::Up => editor.move_cursor(KeyCode::Up),
         KeyCode::Char('l') | KeyCode::Right => editor.move_cursor(KeyCode::Right),
+        KeyCode::Char('w') => editor.move_word_forward(false),
+        KeyCode::Char('W') => editor.move_word_forward(true),
+        KeyCode::Char('b') => editor.move_word_backward(false),
+        KeyCode::Char('B') => editor.move_word_backward(true),
+        KeyCode::Char('e') => editor.move_word_end(false),
+        KeyCode::Char('E') => editor.move_word_end(true),
+        KeyCode::Char('{') => editor.move_prev_paragraph(),
+        KeyCode::Char('}') => editor.move_next_paragraph(),
+        KeyCode::Char('0') => editor.move_line_start(),
+        KeyCode::Char('^') => editor.move_first_non_whitespace(),
+        KeyCode::Char('$') => editor.move_line_end(),
         KeyCode::Char('y') => {
             editor.yoink(editor.sel_sx, editor.sel_sy, editor.cx, editor.cy, editor.mode == Mode::VisualLine);
             editor.mode = Mode::Normal;
@@ -457,6 +585,29 @@ fn handle_visual_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
             editor.delete_range(editor.sel_sx, editor.sel_sy, editor.cx, editor.cy);
             editor.mode = Mode::Insert;
             editor.set_status(String::from("-- INSERT --"));
+        }
+        KeyCode::Char('>') | KeyCode::Char('<') => {
+            let (mut sy, mut ey) = (editor.sel_sy, editor.cy);
+            if sy > ey { std::mem::swap(&mut sy, &mut ey); }
+            editor.save_undo();
+            for y in sy..=ey {
+                if y < editor.rows.len() {
+                    editor.rows[y] = editor.rows[y].duplicate();
+                    if key.code == KeyCode::Char('>') {
+                        editor.rows[y].s.insert(0, b' '); editor.rows[y].s.insert(0, b' ');
+                        editor.rows[y].s.insert(0, b' '); editor.rows[y].s.insert(0, b' ');
+                    } else {
+                        let mut trim = 0;
+                        while trim < 4 && trim < editor.rows[y].s.len() && editor.rows[y].s[trim] == b' ' {
+                            trim += 1;
+                        }
+                        if trim > 0 { editor.rows[y].s.drain(0..trim); }
+                    }
+                    editor.rows[y].needs_highlight = true;
+                }
+            }
+            editor.dirty = true;
+            editor.mode = Mode::Normal;
         }
         _ => {}
     }
