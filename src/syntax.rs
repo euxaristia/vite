@@ -4,7 +4,7 @@ use regex::bytes::Regex;
 use crate::editor::{Row};
 use crate::types::Highlight;
 
-pub fn update_syntax(filename: &str, search_regexp: &Option<Regex>, row_idx: usize, rows: &mut Vec<Row>, force: bool) -> bool {
+pub fn update_syntax(filename: &str, search_regexp: &Option<Regex>, row_idx: usize, rows: &mut [Row], force: bool) -> bool {
     if row_idx >= rows.len() { return false; }
     
     if !force && !rows[row_idx].needs_highlight {
@@ -77,7 +77,7 @@ pub fn update_syntax(filename: &str, search_regexp: &Option<Regex>, row_idx: usi
         _ => None,
     };
 
-    if let Some(_) = lang {
+    if lang.is_some() {
         let tree = parser.parse(&rows[row_idx].s, None);
         if let Some(t) = tree {
             let root = t.root_node();
@@ -116,15 +116,15 @@ fn apply_tree_sitter_highlight(row: &mut Row, node: &Node) {
         "fn" | "let" | "mut" | "match" | "if" | "else" | "for" | "while" | "loop" | "return" | 
         "struct" | "enum" | "trait" | "impl" | "use" | "pub" | "mod" | "type" | "where" | "async" | "await" |
         "const" | "static" | "extern" | "crate" | "self" | "super" | "move" | "ref" | "dyn" |
-        "func" | "package" | "import" | "var" | "go" | "defer" | "chan" | "range" | "map" | "interface" | "select" | "case" | "default" | "switch" | "fallthrough" | "type" |
+        "func" | "package" | "import" | "var" | "go" | "defer" | "chan" | "range" | "map" | "interface" | "select" | "case" | "default" | "switch" | "fallthrough" |
         "def" | "class" | "try" | "except" | "finally" | "raise" | "with" | "as" | "yield" | "from" | "global" | "nonlocal" | "assert" | "del" | "pass" | "lambda" |
-        "if" | "else" | "elif" | "for" | "while" | "break" | "continue" | "return" | "in" | "is" | "not" | "and" | "or" |
-        "void" | "int" | "char" | "float" | "double" | "struct" | "enum" | "union" | "typedef" | "extern" | "static" | "const" | "volatile" | "inline" | "restrict" |
+        "elif" | "break" | "continue" | "in" | "is" | "not" | "and" | "or" |
+        "void" | "int" | "char" | "double" | "union" | "typedef" | "volatile" | "inline" | "restrict" |
         "atx_heading" | "setext_heading" | "heading_content" | "fenced_code_block_delimiter" => Highlight::Keyword1,
         
         "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i64" | "i128" | "f32" | "f64" | 
-        "usize" | "isize" | "bool" | "char" | "str" | "String" | "Vec" | "Option" | "Result" | "Box" | "Arc" | "Rc" |
-        "int" | "float" | "complex" | "list" | "dict" | "set" | "tuple" | "object" | "None" | "True" | "False" |
+        "usize" | "isize" | "bool" | "str" | "String" | "Vec" | "Option" | "Result" | "Box" | "Arc" | "Rc" |
+        "complex" | "list" | "dict" | "set" | "tuple" | "object" | "None" | "True" | "False" |
         "byte" | "rune" | "uint" | "uintptr" | "float32" | "float64" | "complex64" | "complex128" | "error" |
         "atx_h1_marker" | "atx_h2_marker" | "atx_h3_marker" | "atx_h4_marker" | "atx_h5_marker" | "atx_h6_marker" | "setext_h1_underline" | "setext_h2_underline" |
         "list_marker_plus" | "list_marker_minus" | "list_marker_star" | "list_marker_dot" | "list_marker_parenthesis" |
@@ -150,7 +150,7 @@ fn apply_tree_sitter_highlight(row: &mut Row, node: &Node) {
     }
 }
 
-pub fn update_all_syntax(filename: &str, search_regexp: &Option<Regex>, rows: &mut Vec<Row>, force: bool) {
+pub fn update_all_syntax(filename: &str, search_regexp: &Option<Regex>, rows: &mut [Row], force: bool) {
     for i in 0..rows.len() {
         let changed = update_syntax(filename, search_regexp, i, rows, force);
         if changed && i + 1 < rows.len() {

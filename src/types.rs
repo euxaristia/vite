@@ -4,6 +4,7 @@ pub enum Mode {
     Insert,
     Visual,
     VisualLine,
+    Replace,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

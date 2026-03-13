@@ -14,4 +14,4 @@ Videre respects your environment. It is designed to "go with the flow" of your e
 - **Small Footprint:** By keeping the implementation lean, Videre remains understandable to the user, fulfilling the UNIX goal of a tool that is small enough to be fully mastered.
 
 ## 3. Systems-First Design
-Written in pure Go with a focus on efficient data structures (like the Gap Buffer), Videre provides a high-performance editing experience without heavy modern abstractions.
+Written in pure Rust with a focus on efficient data structures, Videre provides a high-performance editing experience without heavy modern abstractions. By leveraging Rust's safety and performance, it achieves a lean footprint (under 3000 LOC) while maintaining high stability.

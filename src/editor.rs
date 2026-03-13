@@ -104,6 +104,12 @@ pub struct Editor {
     pub in_test: bool,
 }
 
+impl Default for Editor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Editor {
     pub fn new() -> Self {
         Self {
@@ -256,7 +262,7 @@ impl Editor {
 
     pub fn save_file(&mut self) -> io::Result<()> {
         if self.filename.is_empty() {
-            return Err(io::Error::new(io::ErrorKind::Other, "No filename"));
+            return Err(io::Error::other("No filename"));
         }
 
         let mut file = File::create(&self.filename)?;
@@ -281,15 +287,14 @@ impl Editor {
 
         if let Ok(out) = output {
             let s = String::from_utf8_lossy(&out.stdout);
-            if let Some(line) = s.lines().next() {
-                if line.starts_with("## ") {
-                    let mut branch = line[3..].split("...").next().unwrap_or("").to_string();
+            if let Some(line) = s.lines().next()
+                && let Some(stripped) = line.strip_prefix("## ") {
+                    let mut branch = stripped.split("...").next().unwrap_or("").to_string();
                     if s.lines().count() > 1 {
                         branch.push('*');
                     }
                     self.git_status = branch;
                 }
-            }
         }
     }
 
@@ -321,14 +326,13 @@ impl Editor {
             let row = &self.rows[y].s;
             let from_x = if y == start_y { start_x } else { 0 };
             
-            if from_x < row.len() {
-                if let Some(m) = re.find(&row[from_x..]) {
+            if from_x < row.len()
+                && let Some(m) = re.find(&row[from_x..]) {
                     self.cy = y;
                     self.cx = from_x + m.start();
                     self.preferred = self.cx;
                     return;
                 }
-            }
         }
     }
 
@@ -446,11 +450,10 @@ impl Editor {
     }
 
     pub fn get_clipboard(&self) -> Option<Vec<u8>> {
-        if let Ok(mut cb) = Clipboard::new() {
-            if let Ok(text) = cb.get_text() {
+        if let Ok(mut cb) = Clipboard::new()
+            && let Ok(text) = cb.get_text() {
                 return Some(text.into_bytes());
             }
-        }
         None
     }
 
@@ -569,10 +572,22 @@ impl Editor {
             while i < s.len() {
                 let (r, n) = decode_utf8_rune(&s[i..]);
                 if n == 0 { break; }
-                if r == '\n' { self.insert_newline(); }
-                else { self.insert_char(r); }
+                if r == '\n' {
+                    let remainder = self.rows[self.cy].s[self.cx..].to_vec();
+                    self.rows[self.cy].s.truncate(self.cx);
+                    self.rows[self.cy].needs_highlight = true;
+                    self.insert_row(self.cy + 1, remainder);
+                    self.cy += 1;
+                    self.cx = 0;
+                } else {
+                    self.row_insert_char(self.cy, self.cx, r);
+                    let mut buf = [0; 4];
+                    let n = r.encode_utf8(&mut buf).len();
+                    self.cx += n;
+                }
                 i += n;
             }
+            self.preferred = self.cx;
         }
     }
 
@@ -633,8 +648,8 @@ impl Editor {
                     if line[x] == delim { sx = Some(x); break; }
                 }
                 // Search forwards
-                for x in self.cx..line.len() {
-                    if line[x] == delim { ex = Some(x); break; }
+                for (x, &b) in line.iter().enumerate().skip(self.cx) {
+                    if b == delim { ex = Some(x); break; }
                 }
                 
                 if let (Some(mut s), Some(mut e)) = (sx, ex) {
@@ -658,7 +673,7 @@ impl Editor {
                 let mut found_open = None;
                 let mut depth = 0;
                 let mut sy = self.cy;
-                let mut sx = self.cx;
+                let sx = self.cx;
                 
                 // Search backwards for open
                 'outer_open: loop {
@@ -679,15 +694,15 @@ impl Editor {
                     let mut found_close = None;
                     depth = 0;
                     let mut ey = self.cy;
-                    let mut ex = self.cx;
+                    let ex = self.cx;
                     
                     // Search forwards for close
                     'outer_close: loop {
                         let row = &self.rows[ey].s;
                         let start = if ey == self.cy { ex } else { 0 };
-                        for x in start..row.len() {
-                            if row[x] == open { depth += 1; }
-                            else if row[x] == close {
+                        for (x, &b) in row.iter().enumerate().skip(start) {
+                            if b == open { depth += 1; }
+                            else if b == close {
                                 if depth == 0 { found_close = Some((x, ey)); break 'outer_close; }
                                 depth -= 1;
                             }
@@ -760,17 +775,23 @@ impl Editor {
     pub fn handle_substitute(&mut self, cmd: &str) {
         let mut all_lines = false;
         let mut s_cmd = cmd;
-        if cmd.starts_with('%') {
+        if let Some(stripped) = cmd.strip_prefix('%') {
             all_lines = true;
-            s_cmd = &cmd[1..];
+            s_cmd = stripped;
         }
         if !s_cmd.starts_with('s') { return; }
         let rest = &s_cmd[1..];
-        if rest.len() < 3 { self.set_status("Invalid substitute command".into()); return; }
+        if rest.is_empty() {
+            self.set_status("Invalid substitute command: expected s/pat/repl/".into());
+            return;
+        }
         
         let delimiter = rest.chars().next().unwrap();
         let parts: Vec<&str> = rest[1..].split(delimiter).collect();
-        if parts.len() < 2 { self.set_status("Invalid substitute command".into()); return; }
+        if parts.len() < 2 {
+            self.set_status(format!("Invalid substitute command: expected 2 parts after '{}'", delimiter));
+            return;
+        }
         
         let pattern = parts[0];
         let replacement = parts[1];
@@ -780,10 +801,16 @@ impl Editor {
         let start_row = if all_lines { 0 } else { self.cy };
         let end_row = if all_lines { self.rows.len().saturating_sub(1) } else { self.cy };
         
-        if start_row >= self.rows.len() { return; }
+        if self.rows.is_empty() {
+            self.set_status("Empty buffer".into());
+            return;
+        }
         
         let re = Regex::new(&format!("(?i){}", pattern));
-        if let Err(e) = re { self.set_status(format!("Invalid regex: {}", e)); return; }
+        if let Err(e) = re {
+            self.set_status(format!("Invalid regex '{}': {}", pattern, e));
+            return;
+        }
         let re = re.unwrap();
         
         self.save_undo();
@@ -808,7 +835,7 @@ impl Editor {
             self.dirty = true;
             self.set_status("Substitutions complete".into());
         } else {
-            self.set_status("Pattern not found".into());
+            self.set_status(format!("Pattern not found: {}", pattern));
         }
     }
 
@@ -881,16 +908,14 @@ impl Editor {
                     self.cx = 0;
                 }
             }
-            crossterm::event::KeyCode::Up => {
-                if self.cy > 0 {
+            crossterm::event::KeyCode::Up
+                if self.cy > 0 => {
                     self.cy -= 1;
                 }
-            }
-            crossterm::event::KeyCode::Down => {
-                if self.cy < self.rows.len().saturating_sub(1) {
+            crossterm::event::KeyCode::Down
+                if self.cy < self.rows.len().saturating_sub(1) => {
                     self.cy += 1;
                 }
-            }
             _ => {}
         }
 
@@ -927,6 +952,7 @@ impl Editor {
     }
 
     pub fn insert_char(&mut self, c: char) {
+        self.save_undo();
         if self.cy == self.rows.len() {
             self.insert_row(self.rows.len(), Vec::new());
         }
@@ -938,6 +964,7 @@ impl Editor {
     }
 
     pub fn insert_newline(&mut self) {
+        self.save_undo();
         if self.cx == 0 {
             self.insert_row(self.cy, Vec::new());
         } else {
@@ -955,6 +982,7 @@ impl Editor {
         if self.cy == self.rows.len() || (self.cx == 0 && self.cy == 0) {
             return;
         }
+        self.save_undo();
         if self.cx > 0 {
             let prev = utf8_prev_boundary(&self.rows[self.cy].s, self.cx);
             self.row_del_char(self.cy, prev);
@@ -1214,18 +1242,18 @@ fn is_word_char(c: u8) -> bool {
 
 pub fn rune_display_width(r: char) -> usize {
     let cp = r as u32;
-    if cp < 0x20 || (cp >= 0x7F && cp < 0xA0) { return 0; }
-    if (cp >= 0x0300 && cp <= 0x036F) || (cp >= 0x1AB0 && cp <= 0x1AFF) ||
-       (cp >= 0x1DC0 && cp <= 0x1DFF) || (cp >= 0x20D0 && cp <= 0x20FF) ||
-       (cp >= 0xFE20 && cp <= 0xFE2F) || cp == 0x200D ||
-       (cp >= 0xFE00 && cp <= 0xFE0F) { return 0; }
-    if (cp >= 0x1100 && cp <= 0x115F) || (cp >= 0x2329 && cp <= 0x232A) ||
-       (cp >= 0x2E80 && cp <= 0xA4CF) || (cp >= 0xAC00 && cp <= 0xD7A3) ||
-       (cp >= 0xF900 && cp <= 0xFAFF) || (cp >= 0xFE10 && cp <= 0xFE19) ||
-       (cp >= 0xFE30 && cp <= 0xFE6F) || (cp >= 0xFF00 && cp <= 0xFF60) ||
-       (cp >= 0xFFE0 && cp <= 0xFFE6) { return 2; }
-    if (cp >= 0x1F300 && cp <= 0x1F64F) || (cp >= 0x1F680 && cp <= 0x1F6FF) ||
-       (cp >= 0x1F900 && cp <= 0x1F9FF) || (cp >= 0x2600 && cp <= 0x27BF) { return 2; }
+    if cp < 0x20 || (0x7F..0xA0).contains(&cp) { return 0; }
+    if (0x0300..=0x036F).contains(&cp) || (0x1AB0..=0x1AFF).contains(&cp) ||
+       (0x1DC0..=0x1DFF).contains(&cp) || (0x20D0..=0x20FF).contains(&cp) ||
+       (0xFE20..=0xFE2F).contains(&cp) || cp == 0x200D ||
+       (0xFE00..=0xFE0F).contains(&cp) { return 0; }
+    if (0x1100..=0x115F).contains(&cp) || (0x2329..=0x232A).contains(&cp) ||
+       (0x2E80..=0xA4CF).contains(&cp) || (0xAC00..=0xD7A3).contains(&cp) ||
+       (0xF900..=0xFAFF).contains(&cp) || (0xFE10..=0xFE19).contains(&cp) ||
+       (0xFE30..=0xFE6F).contains(&cp) || (0xFF00..=0xFF60).contains(&cp) ||
+       (0xFFE0..=0xFFE6).contains(&cp) { return 2; }
+    if (0x1F300..=0x1F64F).contains(&cp) || (0x1F680..=0x1F6FF).contains(&cp) ||
+       (0x1F900..=0x1F9FF).contains(&cp) || (0x2600..=0x27BF).contains(&cp) { return 2; }
     1
 }
 
@@ -1255,8 +1283,10 @@ pub fn decode_utf8_rune(s: &[u8]) -> (char, usize) {
             else if first & 0xF8 == 0xF0 { 4 }
             else { 1 };
     if n > s.len() { return (first as char, 1); }
-    let s_str = std::str::from_utf8(&s[..n]).unwrap_or("");
-    (s_str.chars().next().unwrap_or(first as char), n)
+    match std::str::from_utf8(&s[..n]) {
+        Ok(s_str) => (s_str.chars().next().unwrap_or(first as char), n),
+        Err(_) => (first as char, 1),
+    }
 }
 
 pub fn utf8_prev_boundary(s: &[u8], mut idx: usize) -> usize {

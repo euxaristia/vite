@@ -105,7 +105,7 @@ fn draw_rows(editor: &mut Editor, stdout: &mut impl Write) -> Result<()> {
     for y in 0..editor.screen_rows {
         let filerow = y + editor.rowoff;
         if filerow >= editor.rows.len() {
-            if editor.rows.len() == 0 && y >= editor.screen_rows / 3 && y < editor.screen_rows / 3 + WELCOME_LINES.len() {
+            if editor.rows.is_empty() && y >= editor.screen_rows / 3 && y < editor.screen_rows / 3 + WELCOME_LINES.len() {
                 queue!(stdout, SetForegroundColor(Color::DarkGrey), Print("~"), SetForegroundColor(Color::Reset))?;
                 
                 let msg = WELCOME_LINES[y - editor.screen_rows / 3];
@@ -142,15 +142,12 @@ fn draw_rows(editor: &mut Editor, stdout: &mut impl Write) -> Result<()> {
 
                 let mut hl = row.hl[i];
                 // Check if current search match is under cursor
-                if hl == Highlight::Match {
-                    if let Some(re) = &editor.search_regexp {
-                        if let Some(m) = re.find(&row.s) {
-                            if filerow == editor.cy && i >= m.start() && i < m.end() && editor.cx >= m.start() && editor.cx < m.end() {
+                if hl == Highlight::Match
+                    && let Some(re) = &editor.search_regexp
+                        && let Some(m) = re.find(&row.s)
+                            && filerow == editor.cy && i >= m.start() && i < m.end() && editor.cx >= m.start() && editor.cx < m.end() {
                                 hl = Highlight::MatchCursor;
                             }
-                        }
-                    }
-                }
 
                 let (fg, mut bg) = highlight_to_color(hl);
 
@@ -257,6 +254,7 @@ fn draw_message_bar(editor: &Editor, stdout: &mut impl Write) -> Result<()> {
             Mode::Insert => String::from("-- INSERT --"),
             Mode::Visual => String::from("-- VISUAL --"),
             Mode::VisualLine => String::from("-- VISUAL LINE --"),
+            Mode::Replace => String::from("-- REPLACE --"),
             _ => String::new(),
         };
     }

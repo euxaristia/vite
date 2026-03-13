@@ -9,7 +9,7 @@ pub fn process_keypress(editor: &mut Editor) -> Result<bool> {
         Event::Key(key_event) => {
             match editor.mode {
                 Mode::Normal => handle_normal_mode(editor, key_event),
-                Mode::Insert => handle_insert_mode(editor, key_event),
+                Mode::Insert | Mode::Replace => handle_insert_mode(editor, key_event),
                 Mode::Visual | Mode::VisualLine => handle_visual_mode(editor, key_event),
             }
         }
@@ -73,12 +73,11 @@ fn handle_normal_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
         editor.count_prefix *= 10;
         return Ok(false);
     }
-    if let KeyCode::Char(c) = key.code {
-        if c.is_ascii_digit() && c != '0' && !key.modifiers.contains(KeyModifiers::CONTROL) {
+    if let KeyCode::Char(c) = key.code
+        && c.is_ascii_digit() && c != '0' && !key.modifiers.contains(KeyModifiers::CONTROL) {
             editor.count_prefix = editor.count_prefix * 10 + (c as usize - '0' as usize);
             return Ok(false);
         }
-    }
 
     let count = if editor.count_prefix == 0 { 1 } else { editor.count_prefix };
 
@@ -97,22 +96,16 @@ fn handle_normal_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
         
         KeyCode::Char('i') => {
             editor.mode = Mode::Insert;
-            editor.set_status(String::from("-- INSERT --"));
-            editor.save_undo();
         }
         KeyCode::Char('a') => {
             if !editor.rows.is_empty() {
                 editor.cx = crate::editor::utf8_next_boundary(&editor.rows[editor.cy].s, editor.cx);
             }
             editor.mode = Mode::Insert;
-            editor.set_status(String::from("-- INSERT --"));
-            editor.save_undo();
         }
         KeyCode::Char('I') => {
             editor.move_first_non_whitespace();
             editor.mode = Mode::Insert;
-            editor.set_status(String::from("-- INSERT --"));
-            editor.save_undo();
         }
         KeyCode::Char('A') => {
             editor.move_line_end();
@@ -120,8 +113,6 @@ fn handle_normal_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
                 editor.cx = crate::editor::utf8_next_boundary(&editor.rows[editor.cy].s, editor.cx);
             }
             editor.mode = Mode::Insert;
-            editor.set_status(String::from("-- INSERT --"));
-            editor.save_undo();
         }
         KeyCode::Char('o') => {
             if editor.rows.is_empty() {
@@ -135,8 +126,6 @@ fn handle_normal_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
             }
             editor.insert_newline();
             editor.mode = Mode::Insert;
-            editor.set_status(String::from("-- INSERT --"));
-            editor.save_undo();
         }
         KeyCode::Char('O') => {
             if editor.rows.is_empty() {
@@ -149,8 +138,35 @@ fn handle_normal_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
                 editor.cx = 0; editor.preferred = 0;
             }
             editor.mode = Mode::Insert;
-            editor.set_status(String::from("-- INSERT --"));
-            editor.save_undo();
+        }
+        KeyCode::Char('S') => {
+            let sy = editor.cy;
+            let ey = (editor.cy + count).saturating_sub(1).min(editor.rows.len().saturating_sub(1));
+            editor.yoink(0, sy, 0, ey, true);
+            for _ in 0..=(ey - sy) {
+                editor.del_row(sy);
+            }
+            if editor.rows.is_empty() {
+                editor.insert_row(0, Vec::new());
+            }
+            editor.insert_row(sy, Vec::new());
+            editor.cy = sy;
+            editor.cx = 0;
+            editor.preferred = 0;
+            editor.mode = Mode::Insert;
+        }
+        KeyCode::Char('C') => {
+            let sx = editor.cx;
+            let sy = editor.cy;
+            let ex = editor.rows[sy].s.len().saturating_sub(1);
+            if sx < editor.rows[sy].s.len() {
+                editor.yoink(sx, sy, ex, sy, false);
+                editor.delete_range(sx, sy, ex, sy);
+            }
+            editor.mode = Mode::Insert;
+        }
+        KeyCode::Char('R') => {
+            editor.mode = Mode::Replace;
         }
         KeyCode::Char('v') => {
             if editor.mode == Mode::Visual {
@@ -198,8 +214,8 @@ fn handle_normal_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
             }
         }
         KeyCode::Char('g') => {
-            if let Event::Key(next_key) = event::read()? {
-                if next_key.code == KeyCode::Char('g') {
+            if let Event::Key(next_key) = event::read()?
+                && next_key.code == KeyCode::Char('g') {
                     if editor.count_prefix > 0 {
                         let target = editor.count_prefix.saturating_sub(1);
                         editor.cy = target.min(editor.rows.len().saturating_sub(1));
@@ -208,24 +224,21 @@ fn handle_normal_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
                         editor.move_file_start();
                     }
                 }
-            }
         }
         KeyCode::Char('m') => {
-            if let Event::Key(next_key) = event::read()? {
-                if let KeyCode::Char(m) = next_key.code {
-                    if m >= 'a' && m <= 'z' {
+            if let Event::Key(next_key) = event::read()?
+                && let KeyCode::Char(m) = next_key.code
+                    && m.is_ascii_lowercase() {
                         let i = (m as u8 - b'a') as usize;
                         editor.mark_set[i] = true;
                         editor.marks_x[i] = editor.cx;
                         editor.marks_y[i] = editor.cy;
                     }
-                }
-            }
         }
         KeyCode::Char('\'') => {
-            if let Event::Key(next_key) = event::read()? {
-                if let KeyCode::Char(m) = next_key.code {
-                    if m >= 'a' && m <= 'z' {
+            if let Event::Key(next_key) = event::read()?
+                && let KeyCode::Char(m) = next_key.code
+                    && m.is_ascii_lowercase() {
                         let i = (m as u8 - b'a') as usize;
                         if editor.mark_set[i] {
                             editor.cy = editor.marks_y[i].min(editor.rows.len().saturating_sub(1));
@@ -235,8 +248,6 @@ fn handle_normal_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
                             editor.set_status("Mark not set".into());
                         }
                     }
-                }
-            }
         }
         KeyCode::Char('u') => { for _ in 0..count { editor.do_undo(); } }
         KeyCode::Char('x') => {
@@ -326,13 +337,12 @@ fn handle_normal_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
         KeyCode::Char('"') => {
             editor.set_status("\"".into());
             ui::refresh_screen(editor)?;
-            if let Event::Key(reg_key) = event::read()? {
-                if let KeyCode::Char(r) = reg_key.code {
+            if let Event::Key(reg_key) = event::read()?
+                && let KeyCode::Char(r) = reg_key.code {
                     editor.selected_register = r as usize;
                     editor.set_status(format!("\"{}", r));
                     ui::refresh_screen(editor)?;
                 }
-            }
             return Ok(false);
         }
         KeyCode::Char('f') | KeyCode::Char('F') | KeyCode::Char('t') | KeyCode::Char('T') => {
@@ -340,15 +350,14 @@ fn handle_normal_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
                 KeyCode::Char(c) => c,
                 _ => 'f',
             };
-            if let Event::Key(next_key) = event::read()? {
-                if let KeyCode::Char(n) = next_key.code {
+            if let Event::Key(next_key) = event::read()?
+                && let KeyCode::Char(n) = next_key.code {
                     let dir = if mode_char == 'F' || mode_char == 'T' { -1 } else { 1 };
                     let till = mode_char == 't' || mode_char == 'T';
                     for _ in 0..count {
                         if !editor.find_char(n as u8, dir, till) { break; }
                     }
                 }
-            }
         }
         KeyCode::Char('Z') => {
             if let Event::Key(next_key) = event::read()? {
@@ -371,18 +380,15 @@ fn handle_normal_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
 }
 
 fn operator_exclusive_motion(m: char) -> bool {
-    match m {
-        'w' | 'W' | 'b' | 'B' | '0' | '^' | '{' | '}' | 'h' | 'j' | 'k' | 'l' | 'g' | 'G' => true,
-        _ => false,
-    }
+    matches!(m, 'w' | 'W' | 'b' | 'B' | '0' | '^' | '{' | '}' | 'h' | 'j' | 'k' | 'l' | 'g' | 'G')
 }
 
 fn handle_operator(editor: &mut Editor, op: char, count: usize) -> Result<()> {
     let start_x = editor.cx;
     let start_y = editor.cy;
     
-    if let Event::Key(m_key) = event::read()? {
-        if let KeyCode::Char(m) = m_key.code {
+    if let Event::Key(m_key) = event::read()?
+        && let KeyCode::Char(m) = m_key.code {
             if m == op {
                 let sy = editor.cy;
                 let ey = (editor.cy + count).saturating_sub(1).min(editor.rows.len().saturating_sub(1));
@@ -428,9 +434,9 @@ fn handle_operator(editor: &mut Editor, op: char, count: usize) -> Result<()> {
             }
             
             if m == 'i' || m == 'a' {
-                if let Event::Key(obj_key) = event::read()? {
-                    if let KeyCode::Char(obj) = obj_key.code {
-                        if let Some((sx, sy, ex, ey)) = editor.find_text_object(obj, m == 'i') {
+                if let Event::Key(obj_key) = event::read()?
+                    && let KeyCode::Char(obj) = obj_key.code
+                        && let Some((sx, sy, ex, ey)) = editor.find_text_object(obj, m == 'i') {
                             editor.yoink(sx, sy, ex, ey, false);
                             if op != 'y' {
                                 editor.delete_range(sx, sy, ex, ey);
@@ -444,8 +450,6 @@ fn handle_operator(editor: &mut Editor, op: char, count: usize) -> Result<()> {
                             editor.selected_register = '"' as usize;
                             return Ok(());
                         }
-                    }
-                }
                 return Ok(());
             }
 
@@ -534,7 +538,6 @@ fn handle_operator(editor: &mut Editor, op: char, count: usize) -> Result<()> {
             }
             editor.selected_register = '"' as usize;
         }
-    }
     Ok(())
 }
 
@@ -545,16 +548,14 @@ fn handle_visual_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
             editor.set_status(String::new());
         }
         KeyCode::Char('i') | KeyCode::Char('a') => {
-            if let Event::Key(obj_key) = event::read()? {
-                if let KeyCode::Char(obj) = obj_key.code {
-                    if let Some((sx, sy, ex, ey)) = editor.find_text_object(obj, key.code == KeyCode::Char('i')) {
+            if let Event::Key(obj_key) = event::read()?
+                && let KeyCode::Char(obj) = obj_key.code
+                    && let Some((sx, sy, ex, ey)) = editor.find_text_object(obj, key.code == KeyCode::Char('i')) {
                         editor.sel_sx = sx; editor.sel_sy = sy;
                         editor.cx = ex; editor.cy = ey;
                         editor.preferred = ex;
                         editor.mode = Mode::Visual;
                     }
-                }
-            }
         }
         KeyCode::Char('h') | KeyCode::Left => editor.move_cursor(KeyCode::Left),
         KeyCode::Char('j') | KeyCode::Down => editor.move_cursor(KeyCode::Down),
@@ -623,12 +624,41 @@ fn handle_insert_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
             }
             editor.set_status(String::new());
         }
-        KeyCode::Enter => editor.insert_newline(),
+        KeyCode::Enter => {
+            if editor.mode == Mode::Replace {
+                editor.move_cursor(KeyCode::Down);
+                editor.move_line_start();
+            } else {
+                editor.insert_newline();
+            }
+        }
         KeyCode::Tab => {
             for _ in 0..4 { editor.insert_char(' '); }
         }
-        KeyCode::Backspace => editor.del_char(),
-        KeyCode::Char(c) => editor.insert_char(c),
+        KeyCode::Backspace => {
+            if editor.mode == Mode::Replace {
+                editor.move_cursor(KeyCode::Left);
+            } else {
+                editor.del_char();
+            }
+        }
+        KeyCode::Char(c) => {
+            if editor.mode == Mode::Replace {
+                if editor.cy < editor.rows.len() && editor.cx < editor.rows[editor.cy].s.len() {
+                    editor.save_undo();
+                    editor.row_del_char(editor.cy, editor.cx);
+                    editor.row_insert_char(editor.cy, editor.cx, c);
+                    let mut buf = [0; 4];
+                    let n = c.encode_utf8(&mut buf).len();
+                    editor.cx += n;
+                    editor.preferred = editor.cx;
+                } else {
+                    editor.insert_char(c);
+                }
+            } else {
+                editor.insert_char(c);
+            }
+        }
         KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => editor.move_cursor(key.code),
         _ => {}
     }
