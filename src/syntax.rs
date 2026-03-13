@@ -120,14 +120,14 @@ fn apply_tree_sitter_highlight(row: &mut Row, node: &Node) {
         "def" | "class" | "try" | "except" | "finally" | "raise" | "with" | "as" | "yield" | "from" | "global" | "nonlocal" | "assert" | "del" | "pass" | "lambda" |
         "if" | "else" | "elif" | "for" | "while" | "break" | "continue" | "return" | "in" | "is" | "not" | "and" | "or" |
         "void" | "int" | "char" | "float" | "double" | "struct" | "enum" | "union" | "typedef" | "extern" | "static" | "const" | "volatile" | "inline" | "restrict" |
-        "atx_h1_marker" | "atx_h2_marker" | "atx_h3_marker" | "atx_h4_marker" | "atx_h5_marker" | "atx_h6_marker" | "setext_h1_underline" | "setext_h2_underline" |
-        "fenced_code_block_delimiter" => Highlight::Keyword1,
+        "atx_heading" | "setext_heading" | "heading_content" | "fenced_code_block_delimiter" => Highlight::Keyword1,
         
         "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i64" | "i128" | "f32" | "f64" | 
         "usize" | "isize" | "bool" | "char" | "str" | "String" | "Vec" | "Option" | "Result" | "Box" | "Arc" | "Rc" |
         "int" | "float" | "complex" | "list" | "dict" | "set" | "tuple" | "object" | "None" | "True" | "False" |
         "byte" | "rune" | "uint" | "uintptr" | "float32" | "float64" | "complex64" | "complex128" | "error" |
-        "atx_heading" | "list_marker_plus" | "list_marker_minus" | "list_marker_star" | "list_marker_dot" | "list_marker_parenthesis" |
+        "atx_h1_marker" | "atx_h2_marker" | "atx_h3_marker" | "atx_h4_marker" | "atx_h5_marker" | "atx_h6_marker" | "setext_h1_underline" | "setext_h2_underline" |
+        "list_marker_plus" | "list_marker_minus" | "list_marker_star" | "list_marker_dot" | "list_marker_parenthesis" |
         "link_text" | "link_label" | "emphasis" | "strong_emphasis" => Highlight::Keyword2,
         
         "fenced_code_block" | "code_fence_content" | "indented_code_block" | "inline_code" | "link_destination" | "uri" => Highlight::String,
