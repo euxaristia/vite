@@ -1451,6 +1451,7 @@ func processKeypress() bool {
 		}
 	case '"':
 		setStatus("\"")
+		refreshScreen()
 		r := readKey()
 		if r >= 32 && r <= 255 {
 			E.SelectedRegister = r
