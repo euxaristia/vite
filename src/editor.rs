@@ -620,6 +620,109 @@ impl Editor {
         }
     }
 
+    pub fn handle_substitute(&mut self, cmd: &str) {
+        let mut all_lines = false;
+        let mut s_cmd = cmd;
+        if cmd.starts_with('%') {
+            all_lines = true;
+            s_cmd = &cmd[1..];
+        }
+        if !s_cmd.starts_with('s') { return; }
+        let rest = &s_cmd[1..];
+        if rest.len() < 3 { self.set_status("Invalid substitute command".into()); return; }
+        
+        let delimiter = rest.chars().next().unwrap();
+        let parts: Vec<&str> = rest[1..].split(delimiter).collect();
+        if parts.len() < 2 { self.set_status("Invalid substitute command".into()); return; }
+        
+        let pattern = parts[0];
+        let replacement = parts[1];
+        let flags = if parts.len() > 2 { parts[2] } else { "" };
+        let global = flags.contains('g');
+        
+        let start_row = if all_lines { 0 } else { self.cy };
+        let end_row = if all_lines { self.rows.len().saturating_sub(1) } else { self.cy };
+        
+        if start_row >= self.rows.len() { return; }
+        
+        let re = Regex::new(&format!("(?i){}", pattern));
+        if let Err(e) = re { self.set_status(format!("Invalid regex: {}", e)); return; }
+        let re = re.unwrap();
+        
+        self.save_undo();
+        let mut made_changes = false;
+        let repl_bytes = replacement.as_bytes();
+        for y in start_row..=end_row {
+            let line = &self.rows[y].s;
+            let new_line = if global {
+                re.replace_all(line, repl_bytes).into_owned()
+            } else {
+                re.replace(line, repl_bytes).into_owned()
+            };
+            
+            if new_line != self.rows[y].s {
+                self.rows[y] = self.rows[y].duplicate();
+                self.rows[y].s = new_line;
+                self.rows[y].needs_highlight = true;
+                made_changes = true;
+            }
+        }
+        if made_changes {
+            self.dirty = true;
+            self.set_status("Substitutions complete".into());
+        } else {
+            self.set_status("Pattern not found".into());
+        }
+    }
+
+    pub fn match_bracket(&mut self) {
+        if self.cy >= self.rows.len() { return; }
+        let line = &self.rows[self.cy].s;
+        if line.is_empty() { return; }
+        let c = line[self.cx];
+        let (open, close, dir) = match c {
+            b'(' => (b'(', b')', 1),
+            b'[' => (b'[', b']', 1),
+            b'{' => (b'{', b'}', 1),
+            b')' => (b')', b'(', -1),
+            b']' => (b']', b'[', -1),
+            b'}' => (b'}', b'{', -1),
+            _ => { return; }
+        };
+        
+        let mut depth = 0;
+        let mut y = self.cy;
+        let mut x = self.cx;
+        
+        loop {
+            if line[x] == open { depth += 1; }
+            else if line[x] == close {
+                depth -= 1;
+                if depth == 0 {
+                    self.cy = y;
+                    self.cx = x;
+                    self.preferred = x;
+                    return;
+                }
+            }
+            
+            if dir > 0 {
+                x += 1;
+                while y < self.rows.len() && x >= self.rows[y].s.len() {
+                    y += 1; x = 0;
+                }
+            } else {
+                if x == 0 {
+                    if y == 0 { break; }
+                    y -= 1; x = self.rows[y].s.len().saturating_sub(1);
+                } else {
+                    x -= 1;
+                }
+            }
+            if y >= self.rows.len() { break; }
+        }
+    }
+
     pub fn move_cursor(&mut self, key: crossterm::event::KeyCode) {
         match key {
             crossterm::event::KeyCode::Left => {
@@ -859,6 +962,31 @@ impl Editor {
             r -= 1;
             c = self.rows[r].s.len().saturating_sub(1);
         }
+    }
+
+    pub fn move_next_paragraph(&mut self) {
+        if self.rows.is_empty() { return; }
+        let mut y = self.cy + 1;
+        while y < self.rows.len() {
+            if self.rows[y].s.is_empty() { break; }
+            y += 1;
+        }
+        self.cy = y.min(self.rows.len().saturating_sub(1));
+        self.cx = 0;
+        self.preferred = 0;
+    }
+
+    pub fn move_prev_paragraph(&mut self) {
+        if self.rows.is_empty() { return; }
+        if self.cy == 0 { return; }
+        let mut y = self.cy - 1;
+        while y > 0 {
+            if self.rows[y].s.is_empty() { break; }
+            y -= 1;
+        }
+        self.cy = y;
+        self.cx = 0;
+        self.preferred = 0;
     }
 
     pub fn move_file_start(&mut self) {

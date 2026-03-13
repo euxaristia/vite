@@ -16,24 +16,35 @@ pub fn process_keypress(editor: &mut Editor) -> Result<bool> {
     }
 }
 
-fn prompt(editor: &mut Editor, prefix: &str) -> Result<Option<String>> {
+fn prompt<F>(editor: &mut Editor, prefix: &str, mut callback: F) -> Result<Option<String>> 
+where F: FnMut(&mut Editor, &str, KeyCode) {
     let mut buf = String::new();
     loop {
         editor.set_status(format!("{}{}", prefix, buf));
         ui::refresh_screen(editor)?;
         if let Event::Key(key_event) = event::read()? {
             match key_event.code {
-                KeyCode::Char(c) => buf.push(c),
-                KeyCode::Backspace => { buf.pop(); }
+                KeyCode::Char(c) => {
+                    buf.push(c);
+                    callback(editor, &buf, key_event.code);
+                }
+                KeyCode::Backspace => {
+                    buf.pop();
+                    callback(editor, &buf, key_event.code);
+                }
                 KeyCode::Esc => {
                     editor.set_status(String::new());
+                    callback(editor, &buf, KeyCode::Esc);
                     return Ok(None);
                 }
                 KeyCode::Enter => {
                     editor.set_status(String::new());
+                    callback(editor, &buf, KeyCode::Enter);
                     return Ok(Some(buf));
                 }
-                _ => {}
+                _ => {
+                    callback(editor, &buf, key_event.code);
+                }
             }
         }
     }
@@ -139,13 +150,58 @@ fn handle_normal_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
         KeyCode::Char('l') | KeyCode::Right => { for _ in 0..count { editor.move_cursor(KeyCode::Right); } }
         KeyCode::Char('w') => { for _ in 0..count { editor.move_word_forward(); } }
         KeyCode::Char('b') => { for _ in 0..count { editor.move_word_backward(); } }
+        KeyCode::Char('{') => { for _ in 0..count { editor.move_prev_paragraph(); } }
+        KeyCode::Char('}') => { for _ in 0..count { editor.move_next_paragraph(); } }
+        KeyCode::Char('%') => editor.match_bracket(),
         KeyCode::Char('0') => editor.move_line_start(),
         KeyCode::Char('$') => editor.move_line_end(),
-        KeyCode::Char('G') => editor.move_file_end(),
+        KeyCode::Char('G') => {
+            if editor.count_prefix > 0 {
+                let target = editor.count_prefix.saturating_sub(1);
+                editor.cy = target.min(editor.rows.len().saturating_sub(1));
+                editor.move_line_start();
+            } else {
+                editor.move_file_end();
+            }
+        }
         KeyCode::Char('g') => {
             if let Event::Key(next_key) = event::read()? {
                 if next_key.code == KeyCode::Char('g') {
-                    editor.move_file_start();
+                    if editor.count_prefix > 0 {
+                        let target = editor.count_prefix.saturating_sub(1);
+                        editor.cy = target.min(editor.rows.len().saturating_sub(1));
+                        editor.move_line_start();
+                    } else {
+                        editor.move_file_start();
+                    }
+                }
+            }
+        }
+        KeyCode::Char('m') => {
+            if let Event::Key(next_key) = event::read()? {
+                if let KeyCode::Char(m) = next_key.code {
+                    if m >= 'a' && m <= 'z' {
+                        let i = (m as u8 - b'a') as usize;
+                        editor.mark_set[i] = true;
+                        editor.marks_x[i] = editor.cx;
+                        editor.marks_y[i] = editor.cy;
+                    }
+                }
+            }
+        }
+        KeyCode::Char('\'') => {
+            if let Event::Key(next_key) = event::read()? {
+                if let KeyCode::Char(m) = next_key.code {
+                    if m >= 'a' && m <= 'z' {
+                        let i = (m as u8 - b'a') as usize;
+                        if editor.mark_set[i] {
+                            editor.cy = editor.marks_y[i].min(editor.rows.len().saturating_sub(1));
+                            editor.cx = editor.marks_x[i].min(editor.rows[editor.cy].s.len());
+                            editor.preferred = editor.cx;
+                        } else {
+                            editor.set_status("Mark not set".into());
+                        }
+                    }
                 }
             }
         }
@@ -164,15 +220,31 @@ fn handle_normal_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
         }
         KeyCode::Char('p') => { for _ in 0..count { editor.paste(); } }
         KeyCode::Char('/') => {
-            if let Some(p) = prompt(editor, "/")? {
-                editor.set_search_pattern(p);
-                editor.find_next();
+            let saved_x = editor.cx; let saved_y = editor.cy;
+            let saved_pref = editor.preferred; let saved_col = editor.coloff; let saved_row = editor.rowoff;
+            
+            let res = prompt(editor, "/", |ed, query, key| {
+                if key == KeyCode::Esc {
+                    ed.set_search_pattern(String::new());
+                } else if key == KeyCode::Enter {
+                    // keep current position
+                } else {
+                    ed.set_search_pattern(query.to_string());
+                    ed.find_next();
+                }
+            })?;
+            
+            if res.is_none() {
+                editor.cx = saved_x; editor.cy = saved_y;
+                editor.preferred = saved_pref; editor.coloff = saved_col; editor.rowoff = saved_row;
             }
         }
         KeyCode::Char('n') => { for _ in 0..count { editor.find_next(); } }
         KeyCode::Char('N') => { for _ in 0..count { editor.find_prev(); } }
+        KeyCode::Char(';') => { for _ in 0..count { editor.repeat_char_search(false); } }
+        KeyCode::Char(',') => { for _ in 0..count { editor.repeat_char_search(true); } }
         KeyCode::Char(':') => {
-            if let Some(cmd) = prompt(editor, ":")? {
+            if let Some(cmd) = prompt(editor, ":", |_, _, _| {})? {
                 let parts: Vec<&str> = cmd.split_whitespace().collect();
                 if parts.is_empty() { return Ok(false); }
                 match parts[0] {
@@ -203,6 +275,9 @@ fn handle_normal_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
                     "h" | "help" => {
                         editor.set_status("Help not implemented yet".into());
                     }
+                    _ if parts[0].starts_with('s') || parts[0].starts_with("%s") => {
+                        editor.handle_substitute(&cmd);
+                    }
                     _ => {
                         if let Ok(n) = parts[0].parse::<usize>() {
                             let target = n.saturating_sub(1);
@@ -226,6 +301,21 @@ fn handle_normal_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
                 }
             }
             return Ok(false);
+        }
+        KeyCode::Char('f') | KeyCode::Char('F') | KeyCode::Char('t') | KeyCode::Char('T') => {
+            let mode_char = match key.code {
+                KeyCode::Char(c) => c,
+                _ => 'f',
+            };
+            if let Event::Key(next_key) = event::read()? {
+                if let KeyCode::Char(n) = next_key.code {
+                    let dir = if mode_char == 'F' || mode_char == 'T' { -1 } else { 1 };
+                    let till = mode_char == 't' || mode_char == 'T';
+                    for _ in 0..count {
+                        if !editor.find_char(n as u8, dir, till) { break; }
+                    }
+                }
+            }
         }
         _ => {}
     }
@@ -254,7 +344,6 @@ fn handle_operator(editor: &mut Editor, op: char, count: usize) -> Result<()> {
                 return Ok(());
             }
             
-            // Handle basic motions for operators
             match m {
                 'w' => { for _ in 0..count { editor.move_word_forward(); } }
                 'b' => { for _ in 0..count { editor.move_word_backward(); } }
@@ -330,6 +419,9 @@ fn handle_insert_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
             editor.set_status(String::new());
         }
         KeyCode::Enter => editor.insert_newline(),
+        KeyCode::Tab => {
+            for _ in 0..4 { editor.insert_char(b' '); }
+        }
         KeyCode::Backspace => editor.del_char(),
         KeyCode::Char(c) => editor.insert_char(c as u8),
         KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => editor.move_cursor(key.code),
