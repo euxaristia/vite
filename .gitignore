@@ -30,3 +30,8 @@ security_tests
 fuzz_core
 fuzz/input/large_random.txt
 .aider*
+
+
+# Added by cargo
+
+/target

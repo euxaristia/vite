@@ -191,10 +191,10 @@ fn draw_message_bar(editor: &Editor, stdout: &mut impl Write) -> Result<()> {
     let mut msg = editor.statusmsg.clone();
     if msg.is_empty() {
         msg = match editor.mode {
-            Mode::Normal => String::from("-- NORMAL --"),
             Mode::Insert => String::from("-- INSERT --"),
             Mode::Visual => String::from("-- VISUAL --"),
             Mode::VisualLine => String::from("-- VISUAL LINE --"),
+            _ => String::new(),
         };
     }
     
