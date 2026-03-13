@@ -15,6 +15,12 @@ const VERSION_BANNER: &str = r#" ┌──────────────�
  └──────────────────────────────────────────────────────────────┘"#;
 
 fn main() {
+    let original_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        let _ = ui::disable_raw_mode();
+        original_hook(panic_info);
+    }));
+
     let args: Vec<String> = env::args().collect();
     for arg in args.iter().skip(1) {
         if arg == "--version" || arg == "-V" {
@@ -30,10 +36,6 @@ fn main() {
 
     if args.len() >= 2 {
         let _ = editor.open_file(&args[1]);
-        if let Ok((cols, rows)) = ui::get_terminal_size() {
-            editor.screen_cols = cols;
-            editor.screen_rows = rows.saturating_sub(2);
-        }
     }
 
     if let Err(e) = ui::enable_raw_mode() {
@@ -44,7 +46,6 @@ fn main() {
     let result = run_editor(&mut editor);
 
     let _ = ui::disable_raw_mode();
-    let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::Clear(crossterm::terminal::ClearType::All));
 
     if let Err(e) = result {
         eprintln!("Error: {}", e);

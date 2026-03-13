@@ -1,8 +1,9 @@
 use crossterm::{
     cursor,
+    execute,
     queue,
     style::{Color, Print, SetBackgroundColor, SetForegroundColor},
-    terminal::{self, Clear, ClearType},
+    terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use std::io::{stdout, Result, Write};
 
@@ -11,7 +12,14 @@ use crate::editor::{Editor, utf8_snap_boundary, display_width_bytes, rune_displa
 use crate::syntax;
 
 pub fn enable_raw_mode() -> Result<()> {
-    terminal::enable_raw_mode()
+    terminal::enable_raw_mode()?;
+    execute!(stdout(), EnterAlternateScreen)?;
+    Ok(())
+}
+
+pub fn disable_raw_mode() -> Result<()> {
+    execute!(stdout(), LeaveAlternateScreen)?;
+    terminal::disable_raw_mode()
 }
 
 fn highlight_to_color(hl: Highlight) -> (Color, Color) {
@@ -26,10 +34,6 @@ fn highlight_to_color(hl: Highlight) -> (Color, Color) {
         Highlight::MatchCursor => (Color::Black, Color::Yellow),
         Highlight::Visual => (Color::White, Color::DarkGrey),
     }
-}
-
-pub fn disable_raw_mode() -> Result<()> {
-    terminal::disable_raw_mode()
 }
 
 pub fn get_terminal_size() -> Result<(usize, usize)> {
