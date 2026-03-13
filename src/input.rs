@@ -5,14 +5,20 @@ use crate::ui;
 use std::io::Result;
 
 pub fn process_keypress(editor: &mut Editor) -> Result<bool> {
-    if let Event::Key(key_event) = event::read()? {
-        match editor.mode {
-            Mode::Normal => handle_normal_mode(editor, key_event),
-            Mode::Insert => handle_insert_mode(editor, key_event),
-            Mode::Visual | Mode::VisualLine => handle_visual_mode(editor, key_event),
+    match event::read()? {
+        Event::Key(key_event) => {
+            match editor.mode {
+                Mode::Normal => handle_normal_mode(editor, key_event),
+                Mode::Insert => handle_insert_mode(editor, key_event),
+                Mode::Visual | Mode::VisualLine => handle_visual_mode(editor, key_event),
+            }
         }
-    } else {
-        Ok(false)
+        Event::Resize(cols, rows) => {
+            editor.screen_cols = cols as usize;
+            editor.screen_rows = rows.saturating_sub(2) as usize;
+            Ok(false)
+        }
+        _ => Ok(false),
     }
 }
 
@@ -22,30 +28,37 @@ where F: FnMut(&mut Editor, &str, KeyCode) {
     loop {
         editor.set_status(format!("{}{}", prefix, buf));
         ui::refresh_screen(editor)?;
-        if let Event::Key(key_event) = event::read()? {
-            match key_event.code {
-                KeyCode::Char(c) => {
-                    buf.push(c);
-                    callback(editor, &buf, key_event.code);
-                }
-                KeyCode::Backspace => {
-                    buf.pop();
-                    callback(editor, &buf, key_event.code);
-                }
-                KeyCode::Esc => {
-                    editor.set_status(String::new());
-                    callback(editor, &buf, KeyCode::Esc);
-                    return Ok(None);
-                }
-                KeyCode::Enter => {
-                    editor.set_status(String::new());
-                    callback(editor, &buf, KeyCode::Enter);
-                    return Ok(Some(buf));
-                }
-                _ => {
-                    callback(editor, &buf, key_event.code);
+        match event::read()? {
+            Event::Key(key_event) => {
+                match key_event.code {
+                    KeyCode::Char(c) => {
+                        buf.push(c);
+                        callback(editor, &buf, key_event.code);
+                    }
+                    KeyCode::Backspace => {
+                        buf.pop();
+                        callback(editor, &buf, key_event.code);
+                    }
+                    KeyCode::Esc => {
+                        editor.set_status(String::new());
+                        callback(editor, &buf, KeyCode::Esc);
+                        return Ok(None);
+                    }
+                    KeyCode::Enter => {
+                        editor.set_status(String::new());
+                        callback(editor, &buf, KeyCode::Enter);
+                        return Ok(Some(buf));
+                    }
+                    _ => {
+                        callback(editor, &buf, key_event.code);
+                    }
                 }
             }
+            Event::Resize(cols, rows) => {
+                editor.screen_cols = cols as usize;
+                editor.screen_rows = rows.saturating_sub(2) as usize;
+            }
+            _ => {}
         }
     }
 }
