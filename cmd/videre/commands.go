@@ -1450,9 +1450,11 @@ func processKeypress() bool {
 			findNext(-1)
 		}
 	case '"':
+		setStatus("\"")
 		r := readKey()
 		if r >= 32 && r <= 255 {
 			E.SelectedRegister = r
+			setStatus("\"%c", rune(r))
 		}
 		return true
 	case 'h':
