@@ -76,6 +76,18 @@ fn draw_rows(editor: &mut Editor, stdout: &mut impl Write) -> Result<()> {
     let gcols = if g > 0 { g + 1 } else { 0 };
     let text_cols = editor.screen_cols.saturating_sub(gcols);
 
+    let has_selection = editor.mode == Mode::Visual || editor.mode == Mode::VisualLine;
+    let line_selection = editor.mode == Mode::VisualLine;
+    let (mut sy, mut ey, mut sx, mut ex) = (0, 0, 0, 0);
+    if has_selection {
+        sy = editor.sel_sy; ey = editor.cy;
+        sx = editor.sel_sx; ex = editor.cx;
+        if sy > ey || (sy == ey && sx > ex) {
+            std::mem::swap(&mut sy, &mut ey);
+            std::mem::swap(&mut sx, &mut ex);
+        }
+    }
+
     for y in 0..editor.screen_rows {
         let filerow = y + editor.rowoff;
         if filerow >= editor.rows.len() {
@@ -110,20 +122,33 @@ fn draw_rows(editor: &mut Editor, stdout: &mut impl Write) -> Result<()> {
             let len = row.s.len().saturating_sub(start);
             let display_len = if len > text_cols { text_cols } else { len };
 
+            let row_in_selection = has_selection && filerow >= sy && filerow <= ey;
+
             if start < row.s.len() {
                 let end = start + display_len;
                 let visible_s = &row.s[start..end];
                 let visible_hl = &row.hl[start..end];
                 
-                for (&ch, &hl) in visible_s.iter().zip(visible_hl.iter()) {
-                    queue!(stdout, SetForegroundColor(highlight_to_color(hl)))?;
+                for (i, (&ch, &hl)) in visible_s.iter().zip(visible_hl.iter()).enumerate() {
+                    let mut style_bg = Color::Reset;
+                    if row_in_selection {
+                        let x = i + start;
+                        let sel = if line_selection { true }
+                                else if sy == ey { x >= sx && x <= ex }
+                                else if filerow == sy { x >= sx }
+                                else if filerow == ey { x <= ex }
+                                else { true };
+                        if sel { style_bg = Color::DarkGrey; }
+                    }
+
+                    queue!(stdout, SetForegroundColor(highlight_to_color(hl)), SetBackgroundColor(style_bg))?;
                     if ch == b'\t' {
-                        queue!(stdout, Print(" "))?; // Simplified tab for now
+                        queue!(stdout, Print(" "))?;
                     } else {
                         queue!(stdout, Print(ch as char))?;
                     }
                 }
-                queue!(stdout, SetForegroundColor(Color::Reset))?;
+                queue!(stdout, SetForegroundColor(Color::Reset), SetBackgroundColor(Color::Reset))?;
             }
         }
         
@@ -141,6 +166,9 @@ fn draw_status_bar(editor: &Editor, stdout: &mut impl Write) -> Result<()> {
     };
     if editor.dirty {
         left.push_str(" [+]");
+    }
+    if !editor.git_status.is_empty() {
+        left.push_str(&format!(" [{}]", editor.git_status));
     }
 
     let pos = if editor.rows.is_empty() {

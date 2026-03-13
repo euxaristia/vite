@@ -3,6 +3,8 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::path::Path;
 use std::time::Instant;
 use regex::bytes::Regex;
+use arboard::Clipboard;
+use std::process::Command;
 
 use crate::types::{Mode, Highlight, Reg};
 
@@ -154,7 +156,7 @@ impl Editor {
             recording_change: false,
             current_change: Vec::new(),
             key_buffer: Vec::new(),
-            selected_register: 0,
+            selected_register: '"' as usize,
             pending_cmd: String::new(),
             in_test: false,
         }
@@ -169,7 +171,8 @@ impl Editor {
         if at > self.rows.len() {
             return;
         }
-        let row = Row::new(at, s);
+        let mut row = Row::new(at, s);
+        row.idx = at;
         self.rows.insert(at, row);
         for i in at + 1..self.rows.len() {
             self.rows[i].idx = i;
@@ -236,13 +239,12 @@ impl Editor {
         }
 
         self.dirty = false;
+        self.update_git_status();
         Ok(())
     }
 
     pub fn save_file(&mut self) -> io::Result<()> {
         if self.filename.is_empty() {
-            // In a real implementation, we'd prompt here.
-            // For now, return an error if no filename.
             return Err(io::Error::new(io::ErrorKind::Other, "No filename"));
         }
 
@@ -255,7 +257,29 @@ impl Editor {
         self.dirty = false;
         let msg = format!("\"{}\" {}L written", self.filename, self.rows.len());
         self.set_status(msg);
+        self.update_git_status();
         Ok(())
+    }
+
+    pub fn update_git_status(&mut self) {
+        if self.filename.is_empty() { return; }
+        
+        let output = Command::new("git")
+            .args(["status", "--porcelain", "-b"])
+            .output();
+
+        if let Ok(out) = output {
+            let s = String::from_utf8_lossy(&out.stdout);
+            if let Some(line) = s.lines().next() {
+                if line.starts_with("## ") {
+                    let mut branch = line[3..].split("...").next().unwrap_or("").to_string();
+                    if s.lines().count() > 1 {
+                        branch.push('*');
+                    }
+                    self.git_status = branch;
+                }
+            }
+        }
     }
 
     pub fn set_search_pattern(&mut self, p: String) {
@@ -272,10 +296,10 @@ impl Editor {
 
     pub fn find_next(&mut self) {
         if self.search_regexp.is_none() { return; }
-        let re = self.search_regexp.as_ref().unwrap();
+        let re = self.search_regexp.as_ref().unwrap().clone();
         
         let start_y = self.cy;
-        let start_x = if self.cx < self.rows[self.cy].s.len() {
+        let start_x = if self.cy < self.rows.len() && self.cx < self.rows[self.cy].s.len() {
             utf8_next_boundary(&self.rows[self.cy].s, self.cx)
         } else {
             0
@@ -299,7 +323,7 @@ impl Editor {
 
     pub fn find_prev(&mut self) {
         if self.search_regexp.is_none() { return; }
-        let re = self.search_regexp.as_ref().unwrap();
+        let re = self.search_regexp.as_ref().unwrap().clone();
 
         let start_y = self.cy;
         let start_x = self.cx;
@@ -319,102 +343,6 @@ impl Editor {
                     return;
                 }
             }
-        }
-    }
-
-    pub fn move_line_start(&mut self) {
-        self.cx = 0;
-        self.preferred = 0;
-    }
-
-    pub fn move_line_end(&mut self) {
-        if self.cy < self.rows.len() {
-            self.cx = self.rows[self.cy].s.len();
-            if self.mode != Mode::Insert && self.cx > 0 {
-                self.cx = utf8_prev_boundary(&self.rows[self.cy].s, self.cx);
-            }
-            self.preferred = self.cx;
-        }
-    }
-
-    pub fn move_first_non_whitespace(&mut self) {
-        if self.cy < self.rows.len() {
-            let row = &self.rows[self.cy].s;
-            let mut col = 0;
-            while col < row.len() && (row[col] == b' ' || row[col] == b'\t') {
-                col += 1;
-            }
-            self.cx = col;
-            self.preferred = self.cx;
-        }
-    }
-
-    pub fn move_word_forward(&mut self) {
-        if self.rows.is_empty() { return; }
-        let mut r = self.cy;
-        let mut c = self.cx;
-        
-        while r < self.rows.len() {
-            let line = &self.rows[r].s;
-            if c < line.len() {
-                if is_word_char(line[c]) {
-                    while c < line.len() && is_word_char(line[c]) { c += 1; }
-                } else {
-                    while c < line.len() && !is_word_char(line[c]) && line[c] != b' ' && line[c] != b'\t' { c += 1; }
-                }
-            }
-            while c < line.len() && (line[c] == b' ' || line[c] == b'\t') { c += 1; }
-            if c < line.len() {
-                self.cy = r;
-                self.cx = c;
-                self.preferred = c;
-                return;
-            }
-            r += 1;
-            c = 0;
-        }
-    }
-
-    pub fn move_word_backward(&mut self) {
-        if self.rows.is_empty() { return; }
-        if self.cx == 0 && self.cy == 0 { return; }
-        
-        let mut r = self.cy;
-        let mut c = self.cx.saturating_sub(1);
-
-        while r < self.rows.len() {
-            let line = &self.rows[r].s;
-            while c < line.len() && (line[c] == b' ' || line[c] == b'\t') {
-                if c == 0 { break; }
-                c -= 1;
-            }
-            if c < line.len() && (line[c] != b' ' && line[c] != b'\t') {
-                if is_word_char(line[c]) {
-                    while c > 0 && is_word_char(line[c-1]) { c -= 1; }
-                } else {
-                    while c > 0 && !is_word_char(line[c-1]) && line[c-1] != b' ' && line[c-1] != b'\t' { c -= 1; }
-                }
-                self.cy = r;
-                self.cx = c;
-                self.preferred = c;
-                return;
-            }
-            if r == 0 { break; }
-            r -= 1;
-            c = self.rows[r].s.len().saturating_sub(1);
-        }
-    }
-
-    pub fn move_file_start(&mut self) {
-        self.cy = 0;
-        self.cx = 0;
-        self.preferred = 0;
-    }
-
-    pub fn move_file_end(&mut self) {
-        if !self.rows.is_empty() {
-            self.cy = self.rows.len() - 1;
-            self.move_line_end();
         }
     }
 
@@ -456,6 +384,240 @@ impl Editor {
         self.cx = last.cx;
         self.cy = last.cy;
         self.dirty = true;
+    }
+
+    pub fn increment_number(&mut self, delta: i32) {
+        if self.cy >= self.rows.len() { return; }
+        let (i, j, n) = {
+            let line = &self.rows[self.cy].s;
+            let mut i = self.cx;
+            while i < line.len() && !(line[i] >= b'0' && line[i] <= b'9') {
+                if line[i] == b'-' && i + 1 < line.len() && line[i+1] >= b'0' && line[i+1] <= b'9' {
+                    break;
+                }
+                i += 1;
+            }
+            if i >= line.len() { return; }
+            let mut j = i;
+            if line[j] == b'-' { j += 1; }
+            while j < line.len() && line[j] >= b'0' && line[j] <= b'9' { j += 1; }
+            
+            let n_str = String::from_utf8_lossy(&line[i..j]);
+            if let Ok(n) = n_str.parse::<i32>() {
+                (i, j, n)
+            } else {
+                return;
+            }
+        };
+
+        let new_n = n + delta;
+        self.save_undo();
+        
+        let repl = new_n.to_string().into_bytes();
+        let line = &self.rows[self.cy].s;
+        let mut new_line = Vec::with_capacity(line.len() - (j - i) + repl.len());
+        new_line.extend_from_slice(&line[..i]);
+        new_line.extend_from_slice(&repl);
+        new_line.extend_from_slice(&line[j..]);
+        
+        self.rows[self.cy] = self.rows[self.cy].duplicate();
+        self.rows[self.cy].s = new_line;
+        self.cx = (i + repl.len()).saturating_sub(1);
+        self.preferred = self.cx;
+        self.rows[self.cy].needs_highlight = true;
+        self.dirty = true;
+    }
+
+    pub fn set_clipboard(&self, text: &[u8]) {
+        if let Ok(mut cb) = Clipboard::new() {
+            let _ = cb.set_text(String::from_utf8_lossy(text).into_owned());
+        }
+    }
+
+    pub fn get_clipboard(&self) -> Option<Vec<u8>> {
+        if let Ok(mut cb) = Clipboard::new() {
+            if let Ok(text) = cb.get_text() {
+                return Some(text.into_bytes());
+            }
+        }
+        None
+    }
+
+    pub fn yoink(&mut self, mut sx: usize, mut sy: usize, mut ex: usize, mut ey: usize, is_line: bool) {
+        if sy > ey || (sy == ey && sx > ex) {
+            std::mem::swap(&mut sx, &mut ex);
+            std::mem::swap(&mut sy, &mut ey);
+        }
+        
+        let mut b = Vec::new();
+        if is_line {
+            for i in sy..=ey {
+                if i < self.rows.len() {
+                    b.extend_from_slice(&self.rows[i].s);
+                    b.push(b'\n');
+                }
+            }
+        } else if sy == ey && sy < self.rows.len() {
+            let r = &self.rows[sy].s;
+            if sx < r.len() {
+                let end = (ex + 1).min(r.len());
+                if sx < end {
+                    b.extend_from_slice(&r[sx..end]);
+                }
+            }
+        } else {
+            for i in sy..=ey {
+                if i >= self.rows.len() { break; }
+                let r = &self.rows[i].s;
+                if i == sy {
+                    if sx < r.len() { b.extend_from_slice(&r[sx..]); }
+                    b.push(b'\n');
+                } else if i == ey {
+                    let end = (ex + 1).min(r.len());
+                    if ex < r.len() { b.extend_from_slice(&r[..end]); }
+                } else {
+                    b.extend_from_slice(r);
+                    b.push(b'\n');
+                }
+            }
+        }
+
+        let reg_name = self.selected_register;
+        if reg_name == '_' as usize { return; }
+        
+        self.registers[reg_name] = Reg { s: b.clone(), is_line };
+        if reg_name == '"' as usize {
+            self.set_clipboard(&b);
+        }
+    }
+
+    pub fn delete_range(&mut self, mut sx: usize, mut sy: usize, mut ex: usize, mut ey: usize) {
+        if sy > ey || (sy == ey && sx > ex) {
+            std::mem::swap(&mut sx, &mut ex);
+            std::mem::swap(&mut sy, &mut ey);
+        }
+        self.save_undo();
+        if sy == ey {
+            if sy < self.rows.len() {
+                self.rows[sy] = self.rows[sy].duplicate();
+                let r = &mut self.rows[sy];
+                let end = (ex + 1).min(r.s.len());
+                if sx < r.s.len() && sx < end {
+                    r.s.drain(sx..end);
+                    r.needs_highlight = true;
+                }
+            }
+        } else {
+            if sy < self.rows.len() {
+                self.rows[sy] = self.rows[sy].duplicate();
+                let first_part = self.rows[sy].s[..sx].to_vec();
+                let mut last_part = Vec::new();
+                if ey < self.rows.len() {
+                    let last_row_s = &self.rows[ey].s;
+                    if ex + 1 < last_row_s.len() {
+                        last_part = last_row_s[ex + 1..].to_vec();
+                    }
+                }
+                self.rows[sy].s = [first_part, last_part].concat();
+                self.rows[sy].needs_highlight = true;
+                for _ in 0..(ey - sy) {
+                    self.del_row(sy + 1);
+                }
+            }
+        }
+        self.cy = sy;
+        self.cx = sx;
+        if self.cy >= self.rows.len() { self.cy = self.rows.len().saturating_sub(1); }
+        self.preferred = self.cx;
+    }
+
+    pub fn paste(&mut self) {
+        let clip_data = self.get_clipboard();
+        if let Some(clip) = clip_data {
+            let is_line = clip.contains(&b'\n');
+            self.registers['"' as usize] = Reg { s: clip, is_line };
+        }
+        
+        let (s, is_line) = {
+            let r = &self.registers['"' as usize];
+            if r.s.is_empty() { return; }
+            (r.s.clone(), r.is_line)
+        };
+
+        self.save_undo();
+        if is_line {
+            let s_str = String::from_utf8_lossy(&s);
+            let mut at = self.cy + 1;
+            for ln in s_str.lines() {
+                if ln.is_empty() { continue; }
+                self.insert_row(at, ln.as_bytes().to_vec());
+                at += 1;
+            }
+        } else {
+            for &c in &s {
+                if c == b'\n' { self.insert_newline(); }
+                else { self.insert_char(c); }
+            }
+        }
+    }
+
+    pub fn select_word(&mut self) {
+        if self.cy >= self.rows.len() || self.rows[self.cy].s.is_empty() { return; }
+        let r = &self.rows[self.cy].s;
+        let mut sx = self.cx;
+        let mut ex = self.cx;
+        while sx > 0 && is_word_char(r[sx - 1]) { sx -= 1; }
+        while ex < r.len().saturating_sub(1) && is_word_char(r[ex + 1]) { ex += 1; }
+        self.mode = Mode::Visual;
+        self.sel_sy = self.cy;
+        self.sel_sx = sx;
+        self.cx = ex;
+    }
+
+    pub fn find_char(&mut self, c: u8, direction: i32, till: bool) -> bool {
+        if self.rows.is_empty() || self.cy >= self.rows.len() { return false; }
+        self.last_search_char = Some(c);
+        self.last_search_dir = direction;
+        self.last_search_till = till;
+        
+        let line = &self.rows[self.cy].s;
+        if line.is_empty() { return false; }
+        
+        let mut x = self.cx;
+        if direction > 0 {
+            x += 1;
+            while x < line.len() {
+                if line[x] == c {
+                    if till { x = x.saturating_sub(1); }
+                    self.cx = x;
+                    self.preferred = x;
+                    return true;
+                }
+                x += 1;
+            }
+        } else {
+            if x == 0 { return false; }
+            x -= 1;
+            loop {
+                if line[x] == c {
+                    if till { x += 1; if x >= line.len() { x = line.len().saturating_sub(1); } }
+                    self.cx = x;
+                    self.preferred = x;
+                    return true;
+                }
+                if x == 0 { break; }
+                x -= 1;
+            }
+        }
+        false
+    }
+
+    pub fn repeat_char_search(&mut self, reverse: bool) {
+        if let Some(c) = self.last_search_char {
+            let mut dir = self.last_search_dir;
+            if reverse { dir = -dir; }
+            self.find_char(c, dir, self.last_search_till);
+        }
     }
 
     pub fn move_cursor(&mut self, key: crossterm::event::KeyCode) {
@@ -613,6 +775,102 @@ impl Editor {
         }
         if self.cx >= self.coloff + text_cols {
             self.coloff = self.cx - text_cols + 1;
+        }
+    }
+
+    pub fn move_line_start(&mut self) {
+        self.cx = 0;
+        self.preferred = 0;
+    }
+
+    pub fn move_line_end(&mut self) {
+        if self.cy < self.rows.len() {
+            self.cx = self.rows[self.cy].s.len();
+            if self.mode != Mode::Insert && self.cx > 0 {
+                self.cx = utf8_prev_boundary(&self.rows[self.cy].s, self.cx);
+            }
+            self.preferred = self.cx;
+        }
+    }
+
+    pub fn move_first_non_whitespace(&mut self) {
+        if self.cy < self.rows.len() {
+            let row = &self.rows[self.cy].s;
+            let mut col = 0;
+            while col < row.len() && (row[col] == b' ' || row[col] == b'\t') {
+                col += 1;
+            }
+            self.cx = col;
+            self.preferred = self.cx;
+        }
+    }
+
+    pub fn move_word_forward(&mut self) {
+        if self.rows.is_empty() { return; }
+        let mut r = self.cy;
+        let mut c = self.cx;
+        
+        while r < self.rows.len() {
+            let line = &self.rows[r].s;
+            if c < line.len() {
+                if is_word_char(line[c]) {
+                    while c < line.len() && is_word_char(line[c]) { c += 1; }
+                } else {
+                    while c < line.len() && !is_word_char(line[c]) && line[c] != b' ' && line[c] != b'\t' { c += 1; }
+                }
+            }
+            while c < line.len() && (line[c] == b' ' || line[c] == b'\t') { c += 1; }
+            if c < line.len() {
+                self.cy = r;
+                self.cx = c;
+                self.preferred = c;
+                return;
+            }
+            r += 1;
+            c = 0;
+        }
+    }
+
+    pub fn move_word_backward(&mut self) {
+        if self.rows.is_empty() { return; }
+        if self.cx == 0 && self.cy == 0 { return; }
+        
+        let mut r = self.cy;
+        let mut c = self.cx.saturating_sub(1);
+
+        while r < self.rows.len() {
+            let line = &self.rows[r].s;
+            while c < line.len() && (line[c] == b' ' || line[c] == b'\t') {
+                if c == 0 { break; }
+                c -= 1;
+            }
+            if c < line.len() && (line[c] != b' ' && line[c] != b'\t') {
+                if is_word_char(line[c]) {
+                    while c > 0 && is_word_char(line[c-1]) { c -= 1; }
+                } else {
+                    while c > 0 && !is_word_char(line[c-1]) && line[c-1] != b' ' && line[c-1] != b'\t' { c -= 1; }
+                }
+                self.cy = r;
+                self.cx = c;
+                self.preferred = c;
+                return;
+            }
+            if r == 0 { break; }
+            r -= 1;
+            c = self.rows[r].s.len().saturating_sub(1);
+        }
+    }
+
+    pub fn move_file_start(&mut self) {
+        self.cy = 0;
+        self.cx = 0;
+        self.preferred = 0;
+    }
+
+    pub fn move_file_end(&mut self) {
+        if !self.rows.is_empty() {
+            self.cy = self.rows.len() - 1;
+            self.move_line_end();
         }
     }
 }

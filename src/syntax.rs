@@ -7,22 +7,45 @@ use crate::types::Highlight;
 pub fn update_syntax(filename: &str, search_regexp: &Option<Regex>, row_idx: usize, rows: &mut Vec<Row>, force: bool) -> bool {
     if row_idx >= rows.len() { return false; }
     
-    let n = rows[row_idx].s.len();
-    if rows[row_idx].hl.len() != n {
-        rows[row_idx].hl = vec![Highlight::Normal; n];
-    } else if !force && !rows[row_idx].needs_highlight {
+    if !force && !rows[row_idx].needs_highlight {
         return false;
     }
 
+    let n = rows[row_idx].s.len();
+    rows[row_idx].hl = vec![Highlight::Normal; n];
     rows[row_idx].needs_highlight = false;
-    for i in 0..n {
-        rows[row_idx].hl[i] = Highlight::Normal;
-    }
 
     let ext = Path::new(filename)
         .extension()
         .and_then(|s| s.to_str())
         .unwrap_or("");
+
+    // Manual C-style comment handling
+    let mut in_comment = if row_idx > 0 { rows[row_idx - 1].hl_state == 1 } else { false };
+    if ext == "c" || ext == "h" || ext == "go" || ext == "rs" {
+        let mut i = 0;
+        while i < rows[row_idx].s.len() {
+            if in_comment {
+                rows[row_idx].hl[i] = Highlight::Comment;
+                if i + 1 < rows[row_idx].s.len() && rows[row_idx].s[i] == b'*' && rows[row_idx].s[i+1] == b'/' {
+                    rows[row_idx].hl[i+1] = Highlight::Comment;
+                    i += 2;
+                    in_comment = false;
+                    continue;
+                }
+                i += 1;
+                continue;
+            }
+            if i + 1 < rows[row_idx].s.len() && rows[row_idx].s[i] == b'/' && rows[row_idx].s[i+1] == b'*' {
+                rows[row_idx].hl[i] = Highlight::Comment;
+                rows[row_idx].hl[i+1] = Highlight::Comment;
+                i += 2;
+                in_comment = true;
+                continue;
+            }
+            i += 1;
+        }
+    }
 
     let mut parser = Parser::new();
     let lang = match ext {
@@ -68,7 +91,9 @@ pub fn update_syntax(filename: &str, search_regexp: &Option<Regex>, row_idx: usi
         }
     }
 
-    false
+    let old_state = rows[row_idx].hl_state;
+    rows[row_idx].hl_state = if in_comment { 1 } else { 0 };
+    rows[row_idx].hl_state != old_state
 }
 
 fn apply_tree_sitter_highlight(row: &mut Row, node: &Node) {
@@ -109,6 +134,9 @@ fn apply_tree_sitter_highlight(row: &mut Row, node: &Node) {
 
 pub fn update_all_syntax(filename: &str, search_regexp: &Option<Regex>, rows: &mut Vec<Row>, force: bool) {
     for i in 0..rows.len() {
-        update_syntax(filename, search_regexp, i, rows, force);
+        let changed = update_syntax(filename, search_regexp, i, rows, force);
+        if changed && i + 1 < rows.len() {
+            rows[i+1].needs_highlight = true;
+        }
     }
 }
