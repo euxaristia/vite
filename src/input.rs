@@ -625,10 +625,10 @@ fn handle_insert_mode(editor: &mut Editor, key: event::KeyEvent) -> Result<bool>
         }
         KeyCode::Enter => editor.insert_newline(),
         KeyCode::Tab => {
-            for _ in 0..4 { editor.insert_char(b' '); }
+            for _ in 0..4 { editor.insert_char(' '); }
         }
         KeyCode::Backspace => editor.del_char(),
-        KeyCode::Char(c) => editor.insert_char(c as u8),
+        KeyCode::Char(c) => editor.insert_char(c),
         KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => editor.move_cursor(key.code),
         _ => {}
     }

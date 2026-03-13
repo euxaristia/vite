@@ -191,13 +191,19 @@ impl Editor {
         self.dirty = true;
     }
 
-    pub fn row_insert_char(&mut self, row_idx: usize, at: usize, c: u8) {
+    pub fn row_insert_char(&mut self, row_idx: usize, at: usize, c: char) {
         if row_idx >= self.rows.len() {
             return;
         }
         let row = &mut self.rows[row_idx];
         let pos = if at > row.s.len() { row.s.len() } else { at };
-        row.s.insert(pos, c);
+        
+        let mut buf = [0; 4];
+        let bytes = c.encode_utf8(&mut buf).as_bytes();
+        for (i, &b) in bytes.iter().enumerate() {
+            row.s.insert(pos + i, b);
+        }
+        
         row.needs_highlight = true;
         self.dirty = true;
     }
@@ -210,7 +216,12 @@ impl Editor {
         if at >= row.s.len() {
             return;
         }
-        row.s.remove(at);
+        let (_, n) = decode_utf8_rune(&row.s[at..]);
+        for _ in 0..n {
+            if at < row.s.len() {
+                row.s.remove(at);
+            }
+        }
         row.needs_highlight = true;
         self.dirty = true;
     }
@@ -554,9 +565,13 @@ impl Editor {
                 at += 1;
             }
         } else {
-            for &c in &s {
-                if c == b'\n' { self.insert_newline(); }
-                else { self.insert_char(c); }
+            let mut i = 0;
+            while i < s.len() {
+                let (r, n) = decode_utf8_rune(&s[i..]);
+                if n == 0 { break; }
+                if r == '\n' { self.insert_newline(); }
+                else { self.insert_char(r); }
+                i += n;
             }
         }
     }
@@ -911,12 +926,14 @@ impl Editor {
         }
     }
 
-    pub fn insert_char(&mut self, c: u8) {
+    pub fn insert_char(&mut self, c: char) {
         if self.cy == self.rows.len() {
             self.insert_row(self.rows.len(), Vec::new());
         }
         self.row_insert_char(self.cy, self.cx, c);
-        self.cx = utf8_next_boundary(&self.rows[self.cy].s, self.cx);
+        let mut buf = [0; 4];
+        let n = c.encode_utf8(&mut buf).len();
+        self.cx += n;
         self.preferred = self.cx;
     }
 
